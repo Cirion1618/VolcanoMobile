@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.13 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.14 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -90,6 +90,11 @@
     .table{ width:100%; border-collapse:collapse; }
     .table th,.table td{ border-bottom:1px solid var(--border); padding:8px 10px; text-align:left; font-size:13px; }
 
+    /* Toast */
+    .toast-container{ position:fixed; left:0; right:0; bottom:calc(76px + env(safe-area-inset-bottom)); display:flex; justify-content:center; z-index:40; pointer-events:none; }
+    .toast{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:10px 14px; font-size:14px; box-shadow:0 10px 30px rgba(0,0,0,.35); opacity:0; transform:translateY(6px); transition:opacity .18s ease, transform .18s ease; }
+    .toast.show{ opacity:1; transform:translateY(0); }
+
     .muted{ color:var(--muted); font-size:12px; }
   </style>
 </head>
@@ -97,7 +102,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.13 · Mobile‑first</div>
+      <div class="version">v2.14 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -123,6 +128,14 @@
       </div>
 
       <div id="progressContainer" aria-label="Workflow progress"><div id="progress"></div></div>
+
+      <!-- Log now directly under progress bar -->
+      <details class="log" open style="margin-top:8px;">
+        <summary>
+          <span>Event Log</span>
+        </summary>
+        <div id="log" role="log" aria-live="polite"></div>
+      </details>
     </section>
 
     <!-- Workflows -->
@@ -132,16 +145,6 @@
       <button class="btn" onclick="openWorkflowManager()">🗂 Manage Workflows</button>
       <button class="btn" onclick="clearLog()">🧹 Clear Log</button>
       <span id="customRunButtons" style="display:contents"></span>
-    </section>
-
-    <!-- Log -->
-    <section style="margin-top:16px;">
-      <details class="log" open>
-        <summary>
-          <span>Event Log</span>
-        </summary>
-        <div id="log" role="log" aria-live="polite"></div>
-      </details>
     </section>
   </main>
 
@@ -157,6 +160,8 @@
       <div id="workflowList"></div>
     </div>
   </dialog>
+
+  <!-- Toast root (created dynamically if missing) -->
 
   <!-- Bottom reachable toolbar -->
   <nav class="toolbar" aria-label="Primary actions">
@@ -177,7 +182,7 @@
     let polling = false;
     let pumpRunning = false; // ensure declared
 
-    // --- Audio feedback setup ---
+    // --- Audio feedback + popup/notification ---
     let audioCtx = null;
     function getAudioCtx(){
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -208,6 +213,39 @@
           o.stop(t + 0.24);
         });
       }catch(e){ console.warn('Sound playback failed:', e); }
+    }
+
+    function ensureToastContainer(){
+      let c = document.querySelector('.toast-container');
+      if (!c){ c = document.createElement('div'); c.className = 'toast-container'; document.body.appendChild(c); }
+      return c;
+    }
+    function showToast(message){
+      const c = ensureToastContainer();
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.setAttribute('role','status');
+      el.textContent = message;
+      c.appendChild(el);
+      requestAnimationFrame(()=> el.classList.add('show'));
+      setTimeout(()=>{
+        el.classList.remove('show');
+        el.addEventListener('transitionend', ()=> el.remove(), { once:true });
+      }, 3200);
+    }
+
+    async function notifyCompletion(){
+      try{
+        if ("Notification" in window){
+          if (Notification.permission === 'granted'){
+            new Notification('Workflow completed', { body: 'All steps done.', silent:false });
+          } else if (Notification.permission !== 'denied'){
+            const perm = await Notification.requestPermission();
+            if (perm === 'granted') new Notification('Workflow completed', { body: 'All steps done.', silent:false });
+          }
+        }
+      }catch(_){}
+      showToast('✅ Workflow completed');
     }
 
     const serviceUUID = '10110000-5354-4f52-5a26-4249434b454c';
@@ -360,6 +398,7 @@
         }
         await stopPump(); await stopHeater(); stopProgress(); updateProgress(100); log('✅ Workflow completed.');
         playCompletionSound();
+        notifyCompletion();
         if (navigator.vibrate) navigator.vibrate([20,60,20]);
       }catch(e){
         if (e.message==='Aborted'){ log('❌ Workflow aborted.'); await stopPump(); await stopHeater(); stopProgress(); updateProgress(0); }
@@ -381,12 +420,12 @@
       }
     }
 
-    function promptInt(label, validator){
+    function promptNumber(label, validator){
       while(true){
         const s = prompt(label);
         if (s === null) return null;
-        const n = parseInt(String(s).trim(), 10);
-        if (Number.isNaN(n)) { alert('Please enter a valid integer.'); continue; }
+        const n = parseFloat(String(s).replace(',', '.').trim());
+        if (Number.isNaN(n)) { alert('Please enter a valid number.'); continue; }
         if (validator && !validator(n)) { alert('Value out of allowed range.'); continue; }
         return n;
       }
@@ -404,13 +443,15 @@
       const pumps = [];
 
       for (let i = 0; i < steps; i++){
-        const t = promptInt(`Step ${i+1} — Temperature (°C 40–230):`, v => v>=40 && v<=230);
+        const t = promptNumber(`Step ${i+1} — Temperature (°C 40–230):`, v => v>=40 && v<=230);
         if (t === null) return;
-        const h = promptInt(`Step ${i+1} — Hold time (ms, ≥0):`, v => v>=0);
-        if (h === null) return;
-        const p = promptInt(`Step ${i+1} — Pump time (ms, 0–35000):`, v => v>=0 && v<=35000);
-        if (p === null) return;
-        temps.push(t); holds.push(h); pumps.push(p);
+        const hSec = promptNumber(`Step ${i+1} — Hold time (seconds, ≥0):`, v => v>=0);
+        if (hSec === null) return;
+        const pSec = promptNumber(`Step ${i+1} — Pump time (seconds, 0–35):`, v => v>=0 && v<=35);
+        if (pSec === null) return;
+        temps.push(Math.round(t));
+        holds.push(Math.round(hSec*1000));
+        pumps.push(Math.round(pSec*1000));
       }
 
       if (customWorkflows[name] && !confirm('Workflow exists. Overwrite?')) return;
@@ -483,7 +524,7 @@
 
     async function preciseWait(ms){ const start=performance.now(); while (performance.now()-start<ms){ if (abortFlag) throw new Error('Aborted'); await sleep(50); } }
 
-    // ---- Workflow Manager (view/delete/run) ----
+    // ---- Workflow Manager (view/edit/delete/run) ----
     function openWorkflowManager(){ renderWorkflowManager(); const dlg=document.getElementById('workflowDialog'); if (dlg && !dlg.open) dlg.showModal(); }
     function closeWorkflowManager(){ const dlg=document.getElementById('workflowDialog'); if (dlg && dlg.open) dlg.close(); }
 
@@ -496,6 +537,8 @@
         .replace(/'/g,'&#39;');
     }
 
+    function fmtSeconds(ms){ const s = ms/1000; return Number.isInteger(s) ? String(s) : s.toFixed(1); }
+
     function renderWorkflowManager(){
       const wrap = document.getElementById('workflowList'); if (!wrap) return;
       const names = Object.keys(customWorkflows);
@@ -504,10 +547,11 @@
       names.forEach(name => {
         const wf = customWorkflows[name];
         html += `<details open><summary><strong>${escapeHtml(name)}</strong> — ${wf.temperature.length} steps</summary>`;
-        html += '<div style="margin-top:8px;"><table class="table"><thead><tr><th>#</th><th>Temp (°C)</th><th>Hold (ms)</th><th>Pump (ms)</th><th>Actions</th></tr></thead><tbody>';
+        html += '<div style="margin-top:8px;"><table class="table"><thead><tr><th>#</th><th>Temp (°C)</th><th>Hold (s)</th><th>Pump (s)</th><th>Actions</th></tr></thead><tbody>';
         for (let i=0;i<wf.temperature.length;i++){
-          html += `<tr><td>${i+1}</td><td>${wf.temperature[i]}</td><td>${wf.holdTimeInMilliSeconds[i]}</td><td>${wf.pumpTimeInMilliSeconds[i]}</td>` +
+          html += `<tr><td>${i+1}</td><td>${wf.temperature[i]}</td><td>${fmtSeconds(wf.holdTimeInMilliSeconds[i])}</td><td>${fmtSeconds(wf.pumpTimeInMilliSeconds[i])}</td>` +
                   `<td><button class=\"btn\" onclick=\"runNamedWorkflow('${encodeURIComponent(name)}')\">Run</button> ` +
+                  `<button class=\"btn\" onclick=\"openEditWorkflow('${encodeURIComponent(name)}')\">Edit</button> ` +
                   `<button class=\"btn btn-danger\" onclick=\"deleteWorkflow('${encodeURIComponent(name)}')\">Delete</button></td></tr>`;
         }
         html += '</tbody></table></div></details>';
@@ -517,6 +561,98 @@
 
     function runNamedWorkflow(encodedName){ const name = decodeURIComponent(encodedName); if (customWorkflows[name]) runWorkflow(customWorkflows[name]); }
     function deleteWorkflow(encodedName){ const name = decodeURIComponent(encodedName); if (!customWorkflows[name]) return; if (confirm(`Delete workflow "${name}"?`)){ delete customWorkflows[name]; saveWorkflows(); renderWorkflowButtons(); renderWorkflowManager(); log('🗑 Deleted workflow ' + name); } }
+
+    function openEditWorkflow(encodedName){
+      const name = decodeURIComponent(encodedName);
+      const wf = customWorkflows[name]; if (!wf) return;
+      const dlg=document.getElementById('workflowDialog'); if (dlg && !dlg.open) dlg.showModal();
+      const wrap = document.getElementById('workflowList');
+      wrap.innerHTML = `
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <strong>Edit Workflow: ${escapeHtml(name)}</strong>
+          <div class="row">
+            <button class="btn" onclick="renderWorkflowManager()">Back</button>
+          </div>
+        </div>
+        <div>
+          <table class="table">
+            <thead><tr><th>#</th><th>Temp (°C)</th><th>Hold (s)</th><th>Pump (s)</th></tr></thead>
+            <tbody id="editBody"></tbody>
+          </table>
+          <div class="row" style="margin-top:8px; gap:8px;">
+            <button class="btn" onclick="addEditRow()">➕ Add Step</button>
+            <button class="btn btn-danger" onclick="removeEditRow()">➖ Remove Last</button>
+          </div>
+          <div class="row" style="margin-top:12px; gap:8px;">
+            <button class="btn btn-primary" onclick="saveEditWorkflow('${encodeURIComponent(name)}')">💾 Save</button>
+            <button class="btn" onclick="renderWorkflowManager()">Cancel</button>
+          </div>
+          <p class="muted" style="margin-top:8px;">Between 2 and 8 steps. Pump ≤ 35 s.</p>
+        </div>`;
+      // populate rows
+      const body = document.getElementById('editBody');
+      const steps = wf.temperature.length;
+      for (let i=0;i<steps;i++){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${i+1}</td>
+          <td><input type="number" min="40" max="230" step="1" value="${wf.temperature[i]}" /></td>
+          <td><input type="number" min="0" step="0.1" value="${(wf.holdTimeInMilliSeconds[i]/1000).toFixed(1).replace(/\.0$/, '')}" /></td>
+          <td><input type="number" min="0" max="35" step="0.1" value="${(wf.pumpTimeInMilliSeconds[i]/1000).toFixed(1).replace(/\.0$/, '')}" /></td>`;
+        body.appendChild(tr);
+      }
+    }
+
+    function addEditRow(){
+      const body = document.getElementById('editBody'); if (!body) return;
+      const rows = body.querySelectorAll('tr');
+      if (rows.length >= 8){ alert('Maximum 8 steps'); return; }
+      const last = rows[rows.length-1];
+      const clone = last.cloneNode(true);
+      clone.querySelectorAll('input').forEach((inp, idx) => {
+        // Keep same values as last row for convenience
+        inp.value = inp.value;
+      });
+      body.appendChild(clone);
+      renumberEditRows();
+    }
+    function removeEditRow(){
+      const body = document.getElementById('editBody'); if (!body) return;
+      const rows = body.querySelectorAll('tr');
+      if (rows.length <= 2){ alert('Minimum 2 steps'); return; }
+      body.removeChild(rows[rows.length-1]);
+      renumberEditRows();
+    }
+    function renumberEditRows(){
+      const body = document.getElementById('editBody'); if (!body) return;
+      const rows = body.querySelectorAll('tr');
+      rows.forEach((tr, i)=>{ tr.firstElementChild.textContent = String(i+1); });
+    }
+
+    function saveEditWorkflow(encodedName){
+      const name = decodeURIComponent(encodedName);
+      const wf = customWorkflows[name]; if (!wf) return;
+      const body = document.getElementById('editBody');
+      const rows = Array.from(body.querySelectorAll('tr'));
+      if (rows.length < 2 || rows.length > 8){ alert('Steps must be between 2 and 8.'); return; }
+      const temps=[]; const holds=[]; const pumps=[];
+      for (const tr of rows){
+        const [tempInp, holdInp, pumpInp] = Array.from(tr.querySelectorAll('input'));
+        const t = parseInt(tempInp.value, 10);
+        const h = parseFloat(String(holdInp.value).replace(',', '.'));
+        const p = parseFloat(String(pumpInp.value).replace(',', '.'));
+        if (Number.isNaN(t) || t<40 || t>230){ alert('Temps must be 40–230 °C'); return; }
+        if (Number.isNaN(h) || h<0){ alert('Hold must be ≥ 0 s'); return; }
+        if (Number.isNaN(p) || p<0 || p>35){ alert('Pump must be 0–35 s'); return; }
+        temps.push(t);
+        holds.push(Math.round(h*1000));
+        pumps.push(Math.round(p*1000));
+      }
+      customWorkflows[name] = { name, temperature:temps, holdTimeInMilliSeconds:holds, pumpTimeInMilliSeconds:pumps };
+      saveWorkflows();
+      renderWorkflowButtons();
+      renderWorkflowManager();
+      showToast('✅ Saved changes for ' + name);
+    }
 
     // Initialize
     loadWorkflows();
