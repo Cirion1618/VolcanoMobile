@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.14 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.15 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -102,7 +102,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.14 · Mobile‑first</div>
+      <div class="version">v2.15 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -118,6 +118,7 @@
 
     <!-- Manual controls -->
     <section style="margin-top:16px; display:grid; gap:8px;">
+      <!--
       <div class="row wrap">
         <label class="grow" for="manualTemp" style="display:flex; flex-direction:column; gap:6px;">
           <span class="label">Manual Temp (°C)</span>
@@ -126,6 +127,7 @@
         <button class="btn btn-primary" id="btnSetTemp" aria-label="Set temperature" onclick="setManualTemperature()">Set Temp</button>
         <button class="btn" id="pumpToggle" aria-pressed="false" onclick="togglePump()">Start Pump</button>
       </div>
+      -->
 
       <div id="progressContainer" aria-label="Workflow progress"><div id="progress"></div></div>
 
@@ -292,9 +294,9 @@
       const el = document.getElementById('log');
       const line = document.createElement('div');
       line.textContent = `[${time}] ${msg}`;
-      el.appendChild(line);
-      // Always keep the newest entry visible
-      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+      el.insertBefore(line, el.firstChild);
+      // Newest on top
+      requestAnimationFrame(() => { el.scrollTop = 0; });
     }
 
     function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
