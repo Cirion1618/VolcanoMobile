@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.11 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.12 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -89,7 +89,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.11 · Mobile‑first</div>
+      <div class="version">v2.12 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -118,7 +118,7 @@
     </section>
 
     <!-- Workflows -->
-    <section style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+    <section id="workflows" style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
       <button class="btn" onclick="runWorkflowX()">🚀 Start Custom Workflow X</button>
       <button class="btn" onclick="addCustomWorkflow()">➕ Add Workflow</button>
       <button class="btn" onclick="clearLog()">🧹 Clear Log</button>
@@ -142,7 +142,6 @@
       <button class="btn btn-primary" onclick="runWorkflowX()">▶️ Start</button>
       <button class="btn btn-danger" onclick="abortWorkflow()">⛔ Abort</button>
       <button class="btn" id="pumpToggleBottom" onclick="togglePump()">💨 Pump</button>
-      <!-- On wide screens we also show Clear -->
       <button class="btn" style="display:none;" id="clearBottom" onclick="clearLog()">🧹</button>
     </div>
   </nav>
@@ -153,6 +152,8 @@
     let abortFlag = false;
     let workflowActive = false;
     let polling = false;
+    let pumpRunning = false; // FIX: ensure declared
+
     // --- Audio feedback setup ---
     let audioCtx = null;
     function getAudioCtx(){
@@ -206,7 +207,7 @@
           btn.className = 'btn';
           btn.textContent = '🚀 Run ' + name;
           btn.onclick = () => runWorkflow(customWorkflows[name]);
-          document.querySelector('section[style*="Workflows"]').appendChild(btn);
+          document.getElementById('workflows').appendChild(btn);
         });
       } catch (e) { console.error('Failed to load workflows', e); }
     }
@@ -351,7 +352,7 @@
       customWorkflows[name] = { name, temperature:temps, holdTimeInMilliSeconds:holds, pumpTimeInMilliSeconds:pumps };
       saveWorkflows();
       const btn = document.createElement('button'); btn.className='btn'; btn.textContent='🚀 Run ' + name; btn.onclick=()=>runWorkflow(customWorkflows[name]);
-      document.querySelector('section[style*="Workflows"]').appendChild(btn);
+      document.getElementById('workflows').appendChild(btn);
       log('Added workflow ' + name);
     }
 
