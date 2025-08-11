@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.12 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.13 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -82,6 +82,14 @@
     .toolbar .row{ display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; }
     @media (min-width:720px){ .toolbar .row{ grid-template-columns:repeat(5, max-content); justify-content:center; } }
 
+    /* Workflow manager dialog */
+    dialog{ border:1px solid var(--border); border-radius:12px; padding:0; background:var(--panel); color:var(--text); width:min(820px,96vw); }
+    dialog::backdrop{ background:rgba(0,0,0,.45); }
+    .dialog-header{ display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); }
+    .dialog-body{ padding:12px 16px; background:var(--panel-2); max-height:min(65vh, 520px); overflow:auto; }
+    .table{ width:100%; border-collapse:collapse; }
+    .table th,.table td{ border-bottom:1px solid var(--border); padding:8px 10px; text-align:left; font-size:13px; }
+
     .muted{ color:var(--muted); font-size:12px; }
   </style>
 </head>
@@ -89,7 +97,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.12 · Mobile‑first</div>
+      <div class="version">v2.13 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -121,7 +129,9 @@
     <section id="workflows" style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
       <button class="btn" onclick="runWorkflowX()">🚀 Start Custom Workflow X</button>
       <button class="btn" onclick="addCustomWorkflow()">➕ Add Workflow</button>
+      <button class="btn" onclick="openWorkflowManager()">🗂 Manage Workflows</button>
       <button class="btn" onclick="clearLog()">🧹 Clear Log</button>
+      <span id="customRunButtons" style="display:contents"></span>
     </section>
 
     <!-- Log -->
@@ -134,6 +144,19 @@
       </details>
     </section>
   </main>
+
+  <!-- Workflow Manager Dialog -->
+  <dialog id="workflowDialog">
+    <div class="dialog-header">
+      <div><strong>Manage Workflows</strong></div>
+      <div class="row">
+        <button class="btn" onclick="closeWorkflowManager()">Close</button>
+      </div>
+    </div>
+    <div class="dialog-body">
+      <div id="workflowList"></div>
+    </div>
+  </dialog>
 
   <!-- Bottom reachable toolbar -->
   <nav class="toolbar" aria-label="Primary actions">
@@ -152,7 +175,7 @@
     let abortFlag = false;
     let workflowActive = false;
     let polling = false;
-    let pumpRunning = false; // FIX: ensure declared
+    let pumpRunning = false; // ensure declared
 
     // --- Audio feedback setup ---
     let audioCtx = null;
@@ -199,17 +222,26 @@
     function loadWorkflows() {
       try {
         const data = localStorage.getItem('customWorkflows');
-        if (!data) return;
-        const stored = JSON.parse(data);
-        Object.keys(stored).forEach(name => {
-          customWorkflows[name] = stored[name];
-          const btn = document.createElement('button');
-          btn.className = 'btn';
-          btn.textContent = '🚀 Run ' + name;
-          btn.onclick = () => runWorkflow(customWorkflows[name]);
-          document.getElementById('workflows').appendChild(btn);
-        });
+        if (data) {
+          const stored = JSON.parse(data);
+          Object.assign(customWorkflows, stored);
+        }
+        renderWorkflowButtons();
       } catch (e) { console.error('Failed to load workflows', e); }
+    }
+
+    function renderWorkflowButtons(){
+      const container = document.getElementById('customRunButtons');
+      if (!container) return;
+      container.innerHTML = '';
+      Object.keys(customWorkflows).forEach(name => {
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.dataset.runWorkflow = name;
+        btn.textContent = '🚀 Run ' + name;
+        btn.onclick = () => runWorkflow(customWorkflows[name]);
+        container.appendChild(btn);
+      });
     }
 
     const workflowX_temperature = [175, 180, 185, 190, 195];
@@ -339,21 +371,53 @@
       runWorkflow({ name:'Workflow X', temperature:workflowX_temperature, holdTimeInMilliSeconds:workflowX_holdTimeInMilliSeconds, pumpTimeInMilliSeconds:workflowX_pumpTimeInMilliSeconds });
     }
 
+    function promptSteps(){
+      while(true){
+        const s = prompt('How many steps (2–8)?');
+        if (s === null) return null;
+        const n = parseInt(String(s).trim(), 10);
+        if (!Number.isNaN(n) && n>=2 && n<=8) return n;
+        alert('Please enter a number between 2 and 8.');
+      }
+    }
+
+    function promptInt(label, validator){
+      while(true){
+        const s = prompt(label);
+        if (s === null) return null;
+        const n = parseInt(String(s).trim(), 10);
+        if (Number.isNaN(n)) { alert('Please enter a valid integer.'); continue; }
+        if (validator && !validator(n)) { alert('Value out of allowed range.'); continue; }
+        return n;
+      }
+    }
+
     function addCustomWorkflow(){
-      const name = prompt('Workflow name:'); if (!name) return;
-      const tempInput = prompt('Temperatures (comma separated °C):'); if (!tempInput) return;
-      const holdInput = prompt('Hold times (comma separated ms):'); if (!holdInput) return;
-      const pumpInput = prompt('Pump times (comma separated ms, max 35000):'); if (!pumpInput) return;
-      const temps = tempInput.split(',').map(v=>parseInt(v.trim(),10));
-      const holds = holdInput.split(',').map(v=>parseInt(v.trim(),10));
-      const pumps = pumpInput.split(',').map(v=>parseInt(v.trim(),10));
-      if (temps.length!==holds.length || temps.length!==pumps.length){ alert('Arrays must be of equal length'); return; }
-      if (pumps.some(p=>isNaN(p)||p>35000)){ alert('Pump times must be numbers ≤ 35000'); return; }
+      const name = prompt('Workflow name:');
+      if (!name) return;
+
+      const steps = promptSteps();
+      if (steps === null) return;
+
+      const temps = [];
+      const holds = [];
+      const pumps = [];
+
+      for (let i = 0; i < steps; i++){
+        const t = promptInt(`Step ${i+1} — Temperature (°C 40–230):`, v => v>=40 && v<=230);
+        if (t === null) return;
+        const h = promptInt(`Step ${i+1} — Hold time (ms, ≥0):`, v => v>=0);
+        if (h === null) return;
+        const p = promptInt(`Step ${i+1} — Pump time (ms, 0–35000):`, v => v>=0 && v<=35000);
+        if (p === null) return;
+        temps.push(t); holds.push(h); pumps.push(p);
+      }
+
+      if (customWorkflows[name] && !confirm('Workflow exists. Overwrite?')) return;
       customWorkflows[name] = { name, temperature:temps, holdTimeInMilliSeconds:holds, pumpTimeInMilliSeconds:pumps };
       saveWorkflows();
-      const btn = document.createElement('button'); btn.className='btn'; btn.textContent='🚀 Run ' + name; btn.onclick=()=>runWorkflow(customWorkflows[name]);
-      document.getElementById('workflows').appendChild(btn);
-      log('Added workflow ' + name);
+      renderWorkflowButtons();
+      log('Added/Updated workflow ' + name);
     }
 
     function abortWorkflow(){ log('❌ Abort requested.'); abortFlag = true; }
@@ -418,6 +482,41 @@
     async function pollStatuses(){ while (polling){ if (!workflowActive){ await updateStatuses(); } await sleep(3000); } }
 
     async function preciseWait(ms){ const start=performance.now(); while (performance.now()-start<ms){ if (abortFlag) throw new Error('Aborted'); await sleep(50); } }
+
+    // ---- Workflow Manager (view/delete/run) ----
+    function openWorkflowManager(){ renderWorkflowManager(); const dlg=document.getElementById('workflowDialog'); if (dlg && !dlg.open) dlg.showModal(); }
+    function closeWorkflowManager(){ const dlg=document.getElementById('workflowDialog'); if (dlg && dlg.open) dlg.close(); }
+
+    function escapeHtml(s){
+      return String(s)
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/\"/g,'&quot;')
+        .replace(/'/g,'&#39;');
+    }
+
+    function renderWorkflowManager(){
+      const wrap = document.getElementById('workflowList'); if (!wrap) return;
+      const names = Object.keys(customWorkflows);
+      if (!names.length){ wrap.innerHTML = '<p class="muted">No custom workflows yet. Create one with “Add Workflow”.</p>'; return; }
+      let html = '';
+      names.forEach(name => {
+        const wf = customWorkflows[name];
+        html += `<details open><summary><strong>${escapeHtml(name)}</strong> — ${wf.temperature.length} steps</summary>`;
+        html += '<div style="margin-top:8px;"><table class="table"><thead><tr><th>#</th><th>Temp (°C)</th><th>Hold (ms)</th><th>Pump (ms)</th><th>Actions</th></tr></thead><tbody>';
+        for (let i=0;i<wf.temperature.length;i++){
+          html += `<tr><td>${i+1}</td><td>${wf.temperature[i]}</td><td>${wf.holdTimeInMilliSeconds[i]}</td><td>${wf.pumpTimeInMilliSeconds[i]}</td>` +
+                  `<td><button class=\"btn\" onclick=\"runNamedWorkflow('${encodeURIComponent(name)}')\">Run</button> ` +
+                  `<button class=\"btn btn-danger\" onclick=\"deleteWorkflow('${encodeURIComponent(name)}')\">Delete</button></td></tr>`;
+        }
+        html += '</tbody></table></div></details>';
+      });
+      wrap.innerHTML = html;
+    }
+
+    function runNamedWorkflow(encodedName){ const name = decodeURIComponent(encodedName); if (customWorkflows[name]) runWorkflow(customWorkflows[name]); }
+    function deleteWorkflow(encodedName){ const name = decodeURIComponent(encodedName); if (!customWorkflows[name]) return; if (confirm(`Delete workflow "${name}"?`)){ delete customWorkflows[name]; saveWorkflows(); renderWorkflowButtons(); renderWorkflowManager(); log('🗑 Deleted workflow ' + name); } }
 
     // Initialize
     loadWorkflows();
