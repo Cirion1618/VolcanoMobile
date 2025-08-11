@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.17 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.18 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -102,7 +102,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.17 · Mobile‑first</div>
+      <div class="version">v2.18 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -257,6 +257,7 @@
     // Additional UUIDs & connection hints
     const firmwareServiceUUID = '10100000-5354-4f52-5a26-4249434b454c';
     const namePrefixHint = null; // e.g., 'Volcano' to narrow chooser (optional)
+    const preferFilteredChooser = false; // set true to try filtered chooser first
 
     function forgetKnownDevice(){
       try{
@@ -384,10 +385,10 @@
 
     async function connect(){
       try{
-        // Reset previous handles for a clean start
+        // Clean start
         server = null; service = null;
 
-        // Short-circuit if we're already connected
+        // Already connected?
         if (device?.gatt?.connected){
           try {
             server = device.gatt;
@@ -395,63 +396,55 @@
             document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
             log('🔗 Already connected.');
             return;
-          } catch(_) { /* fall through to reconnect */ }
+          } catch(_) { /* continue */ }
         }
 
-        // 1) Try previously authorized device (no chooser)
+        // Try previously authorized device (no chooser)
         let known = null;
-        try{ if (navigator.bluetooth.getDevices) known = await tryGetKnownDevice(); }catch(_){}
+        try{ if (navigator.bluetooth.getDevices) known = await tryGetKnownDevice(); }catch(_){ known = null; }
         if (known){
           device = known;
-          log('🔁 Trying previously authorized device: ' + (device.name || device.id));
-          try{
-            server = await device.gatt.connect();
-          }catch(e){
-            log('⚠️ Known device connect failed: ' + e.message);
-            // If connect fails, forget and fall back to chooser
-            try { device.gatt.disconnect(); } catch(_){}
-            device = null;
-          }
+          log('🔁 Trying known device: ' + (device.name || device.id));
+          try{ server = await device.gatt.connect(); }catch(e){ log('⚠️ Known device connect failed: ' + (e?.message || e?.name || e)); device = null; }
         }
 
-        // 2) If still no server, open chooser (filtered first, then fallback)
+        // Need to show chooser?
         if (!server){
-          try{
-            const filters = namePrefixHint
-              ? [{ namePrefix: namePrefixHint, services: [serviceUUID] }]
-              : [{ services: [serviceUUID] }];
-            device = await navigator.bluetooth.requestDevice({
-              filters,
-              optionalServices: [firmwareServiceUUID, serviceUUID]
-            });
-            log('📶 Selected device (filtered): ' + (device.name || device.id));
-          }catch(e){
-            if (e.name === 'NotFoundError'){
-              log('ℹ️ No matching device via filtered chooser, falling back to all devices...');
-            }else{
-              log('⚠️ Filtered chooser error: ' + e.message + ' — falling back to all devices');
+          if (preferFilteredChooser){
+            try{
+              const filters = namePrefixHint
+                ? [{ namePrefix: namePrefixHint, services: [serviceUUID] }]
+                : [{ services: [serviceUUID] }];
+              device = await navigator.bluetooth.requestDevice({ filters, optionalServices: [firmwareServiceUUID, serviceUUID] });
+              log('📶 Selected device (filtered): ' + (device.name || device.id));
+            }catch(e){
+              const label = (e?.name === 'NotFoundError') ? 'No matching device via filtered chooser' : 'Filtered chooser error';
+              log(`ℹ️ ${label}: ${e?.message || e?.name || 'n/a'} — falling back to all devices...`);
+              device = null;
             }
           }
 
           if (!device){
-            // Fallback: show all devices, but request our services
-            device = await navigator.bluetooth.requestDevice({
-              acceptAllDevices: true,
-              optionalServices: [firmwareServiceUUID, serviceUUID]
-            });
-            log('📶 Selected device (all): ' + (device.name || device.id));
+            try{
+              device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [firmwareServiceUUID, serviceUUID] });
+              log('📶 Selected device (all): ' + (device.name || device.id));
+            }catch(e){
+              document.getElementById('status').innerText = 'Status: Connection cancelled';
+              log('❎ User cancelled / no device selected: ' + (e?.message || e?.name || e));
+              return;
+            }
           }
 
           server = await device.gatt.connect();
         }
 
-        // Get our primary service
+        // Get primary service
         service = await server.getPrimaryService(serviceUUID);
 
         document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
         log('✅ Connected to device: ' + (device.name || device.id));
 
-        // Remember device for next time & listen for disconnects
+        // Persist + disconnect listener
         persistKnownDevice(device);
         device.addEventListener('gattserverdisconnected', () => {
           document.getElementById('status').innerText = 'Status: Disconnected';
@@ -461,7 +454,7 @@
         await readFirmwareVersion();
         polling = true; pollStatuses();
         if (navigator.vibrate) navigator.vibrate(20);
-      }catch(err){ document.getElementById('status').innerText = `Connection failed: ${err.message}`; log('Connection error: ' + err); }
+      }catch(err){ document.getElementById('status').innerText = `Connection failed: ${err.message || err}`; log('Connection error: ' + (err?.message || err?.name || err)); }
     }
 
     async function readFirmwareVersion(){
