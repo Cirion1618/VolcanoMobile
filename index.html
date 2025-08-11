@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.19 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.20 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -102,7 +102,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.19 · Mobile‑first</div>
+      <div class="version">v2.20 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -257,13 +257,13 @@
     // Additional UUIDs & connection hints
     const firmwareServiceUUID = '10100000-5354-4f52-5a26-4249434b454c';
     const namePrefixHint = null; // e.g., 'Volcano' to narrow chooser (optional)
-    const preferFilteredChooser = false; // set true to try filtered chooser first
 
     function forgetKnownDevice(){
       try{
         localStorage.removeItem('volcanoDeviceId');
         localStorage.removeItem('volcanoDeviceName');
         localStorage.removeItem('volcanoDeviceLastSeen');
+        localStorage.removeItem('volcanoDeviceServices');
         log('🧹 Cleared remembered device.');
       }catch(_){ }
     }
@@ -274,6 +274,8 @@
         localStorage.setItem('volcanoDeviceId', dev.id);
         localStorage.setItem('volcanoDeviceName', dev.name || '');
         localStorage.setItem('volcanoDeviceLastSeen', String(Date.now()));
+        const svcs = Array.isArray(dev.uuids) ? dev.uuids : (dev.uuids ? [dev.uuids] : []);
+        localStorage.setItem('volcanoDeviceServices', JSON.stringify(svcs));
       }catch(e){ }
     }
     async function tryGetKnownDevice(){
@@ -438,40 +440,67 @@
           log('🔁 Trying known device: ' + (device.name || device.id));
           const ok = await connectKnownDevice(device);
           if (!ok){
-            log('ℹ️ Known device path failed — falling back to chooser.');
+            log('ℹ️ Known device path failed — will attempt guided chooser.');
             device = null; server = null; service = null;
           }
         }
 
         // Need to show chooser?
         if (!service){
-          if (preferFilteredChooser){
+          // Build full optional services set (previously allowed + required)
+          let optionalAll = [serviceUUID, firmwareServiceUUID];
+          try{
+            const storedSvcs = JSON.parse(localStorage.getItem('volcanoDeviceServices') || '[]');
+            optionalAll = Array.from(new Set(optionalAll.concat(storedSvcs)));
+          }catch(_){ }
+
+          const storedName = localStorage.getItem('volcanoDeviceName');
+
+          // 1) Exact-name chooser if we know the name (tiny list, ideally 1 entry)
+          if (storedName){
             try{
-              const filters = namePrefixHint
-                ? [{ namePrefix: namePrefixHint, services: [serviceUUID] }]
-                : [{ services: [serviceUUID] }];
-              device = await navigator.bluetooth.requestDevice({ filters, optionalServices: [firmwareServiceUUID, serviceUUID] });
-              log('📶 Selected device (filtered): ' + (device.name || device.id));
+              device = await navigator.bluetooth.requestDevice({
+                filters: [{ name: storedName }],
+                optionalServices: optionalAll
+              });
+              log('📶 Selected device (name match): ' + (device.name || device.id));
+              const okByName = await connectKnownDevice(device);
+              if (!okByName) throw new Error('Failed to connect to selected name device');
             }catch(e){
-              const label = (e?.name === 'NotFoundError') ? 'No matching device via filtered chooser' : 'Filtered chooser error';
-              log(`ℹ️ ${label}: ${errInfo(e)} — falling back to all devices...`);
+              log('ℹ️ Name-filter chooser fallback: ' + errInfo(e));
               device = null;
             }
           }
 
-          if (!device){
+          // 2) If still not connected, use prefix filter if configured
+          if (!service && namePrefixHint){
             try{
-              device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [firmwareServiceUUID, serviceUUID] });
+              device = await navigator.bluetooth.requestDevice({
+                filters: [{ namePrefix: namePrefixHint, services: [serviceUUID] }],
+                optionalServices: optionalAll
+              });
+              log('📶 Selected device (prefix): ' + (device.name || device.id));
+              const okByPrefix = await connectKnownDevice(device);
+              if (!okByPrefix) throw new Error('Failed to connect to selected prefix device');
+            }catch(e){
+              log('ℹ️ Prefix-filter chooser fallback: ' + errInfo(e));
+              device = null;
+            }
+          }
+
+          // 3) Final fallback: unfiltered chooser
+          if (!service){
+            try{
+              device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: optionalAll });
               log('📶 Selected device (all): ' + (device.name || device.id));
+              const okAll = await connectKnownDevice(device);
+              if (!okAll) throw new Error('Failed to connect to selected device');
             }catch(e){
               document.getElementById('status').innerText = 'Status: Connection cancelled';
               log('❎ User cancelled / no device selected: ' + errInfo(e));
               return;
             }
           }
-
-          const ok2 = await connectKnownDevice(device);
-          if (!ok2) throw new Error('Failed to connect to selected device');
         }
 
         document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
