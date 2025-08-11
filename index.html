@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Volcano Hybrid Test Control v2.10 (Mobile‑first)</title>
+  <style>
+    :root{
+      --bg:#111213;
+      --panel:#1b1c1e;
+      --panel-2:#232427;
+      --text:#f3f4f6;
+      --muted:#a1a1aa;
+      --brand:#22c55e; /* limegreen-ish */
+      --danger:#ef4444;
+      --warning:#f59e0b;
+      --border:#2f3033;
+      --focus:#60a5fa;
+    }
+    @media (prefers-color-scheme: light){
+      :root{ --bg:#f7f7f8; --panel:#ffffff; --panel-2:#f3f4f6; --text:#0f172a; --muted:#475569; --border:#e5e7eb; }
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      line-height:1.4;
+    }
+    header{
+      position:sticky; top:0; z-index:10; background:var(--panel);
+      padding:12px 16px; border-bottom:1px solid var(--border);
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+    }
+    .title{ font-weight:700; font-size:clamp(16px, 2.8vw, 20px); }
+    .version{ color:var(--muted); font-size:12px; }
+    .container{ max-width:980px; margin:0 auto; padding:16px; padding-bottom:calc(88px + env(safe-area-inset-bottom)); }
+
+    /* Status grid */
+    .grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    @media (min-width:720px){ .grid{ grid-template-columns:repeat(4,1fr);} }
+    .card{
+      background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px;
+      display:flex; flex-direction:column; gap:6px; min-height:72px;
+    }
+    .label{ color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+    .value{ font-size:clamp(18px, 4vw, 24px); font-weight:700; }
+
+    /* Inputs & buttons */
+    input[type="number"], button{
+      font: inherit; color:inherit; background:var(--panel);
+      border:1px solid var(--border); border-radius:12px; padding:14px 16px; min-height:48px;
+    }
+    input[type="number"]{ width:100%; background:var(--panel-2); }
+    input:focus, button:focus{ outline:2px solid var(--focus); outline-offset:2px; }
+    .row{ display:flex; gap:8px; }
+    .row.wrap{ flex-wrap:wrap; }
+    .grow{ flex:1 1 160px; }
+
+    .btn{ background:var(--panel-2); cursor:pointer; }
+    .btn:hover{ filter:brightness(1.08); }
+    .btn-primary{ background:var(--brand); color:#0a0a0a; border-color:transparent; }
+    .btn-danger{ background:var(--danger); color:#fff; border-color:transparent; }
+    .btn-ghost{ background:transparent; }
+
+    /* Progress */
+    #progressContainer{ width:100%; height:16px; background:var(--panel-2); border-radius:999px; border:1px solid var(--border); overflow:hidden; }
+    #progress{ height:100%; width:0%; background:var(--brand); transition:width .25s ease; }
+    @media (prefers-reduced-motion: reduce){ #progress{ transition:none; } }
+
+    /* Log (collapsible) */
+    details.log{ background:var(--panel); border:1px solid var(--border); border-radius:12px; }
+    details.log>summary{ list-style:none; cursor:pointer; padding:12px 14px; display:flex; gap:10px; align-items:center; }
+    details.log>summary::-webkit-details-marker{ display:none; }
+    #log{ max-height:240px; overflow:auto; background:var(--panel-2); border-top:1px solid var(--border); padding:12px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:12px; border-radius:0 0 12px 12px; }
+
+    /* Bottom toolbar for thumb reachability */
+    .toolbar{
+      position:fixed; left:0; right:0; bottom:0; z-index:20; background:rgba(17,18,19,.85);
+      backdrop-filter: blur(8px); border-top:1px solid var(--border);
+      padding:8px 12px calc(8px + env(safe-area-inset-bottom));
+    }
+    .toolbar .row{ display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; }
+    @media (min-width:720px){ .toolbar .row{ grid-template-columns:repeat(5, max-content); justify-content:center; } }
+
+    .muted{ color:var(--muted); font-size:12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="title">Volcano Hybrid – Advanced Control Panel</div>
+      <div class="version">v2.10 · Mobile‑first</div>
+    </div>
+    <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
+  </header>
+
+  <main class="container">
+    <!-- Status cards -->
+    <section class="grid" aria-label="Device status">
+      <div class="card"><div class="label">Current Temp</div><div class="value"><span id="currentTemp">-</span> °C</div></div>
+      <div class="card"><div class="label">Heater</div><div class="value" id="heaterStatus">Unknown</div></div>
+      <div class="card"><div class="label">Pump</div><div class="value" id="pumpStatus">Unknown</div></div>
+      <div class="card"><div class="label">Firmware</div><div class="value" id="firmwareVersion">-</div></div>
+    </section>
+
+    <!-- Manual controls -->
+    <section style="margin-top:16px; display:grid; gap:8px;">
+      <div class="row wrap">
+        <label class="grow" for="manualTemp" style="display:flex; flex-direction:column; gap:6px;">
+          <span class="label">Manual Temp (°C)</span>
+          <input type="number" id="manualTemp" inputmode="numeric" placeholder="e.g. 185" min="40" max="230" step="1" />
+        </label>
+        <button class="btn btn-primary" id="btnSetTemp" aria-label="Set temperature" onclick="setManualTemperature()">Set Temp</button>
+        <button class="btn" id="pumpToggle" aria-pressed="false" onclick="togglePump()">Start Pump</button>
+      </div>
+
+      <div id="progressContainer" aria-label="Workflow progress"><div id="progress"></div></div>
+    </section>
+
+    <!-- Workflows -->
+    <section style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <button class="btn" onclick="runWorkflowX()">🚀 Start Custom Workflow X</button>
+      <button class="btn" onclick="addCustomWorkflow()">➕ Add Workflow</button>
+      <button class="btn" onclick="clearLog()">🧹 Clear Log</button>
+    </section>
+
+    <!-- Log -->
+    <section style="margin-top:16px;">
+      <details class="log" open>
+        <summary>
+          <span>Event Log</span>
+        </summary>
+        <div id="log" role="log" aria-live="polite"></div>
+      </details>
+    </section>
+  </main>
+
+  <!-- Bottom reachable toolbar -->
+  <nav class="toolbar" aria-label="Primary actions">
+    <div class="row">
+      <button class="btn" onclick="connect()">🔗 Connect</button>
+      <button class="btn btn-primary" onclick="runWorkflowX()">▶️ Start</button>
+      <button class="btn btn-danger" onclick="abortWorkflow()">⛔ Abort</button>
+      <button class="btn" id="pumpToggleBottom" onclick="togglePump()">💨 Pump</button>
+      <!-- On wide screens we also show Clear -->
+      <button class="btn" style="display:none;" id="clearBottom" onclick="clearLog()">🧹</button>
+    </div>
+  </nav>
+
+  <script>
+    // --- Original logic kept, UI improved for mobile ---
+    let server, service, device;
+    let abortFlag = false;
+    let workflowActive = false;
+    let polling = false;
+    let pumpRunning = false;
+
+    const serviceUUID = '10110000-5354-4f52-5a26-4249434b454c';
+    const pumpOnUUID = '10110013-5354-4f52-5a26-4249434b454c';
+    const pumpOffUUID = '10110014-5354-4f52-5a26-4249434b454c';
+
+    const customWorkflows = {};
+
+    function saveWorkflows() {
+      try { localStorage.setItem('customWorkflows', JSON.stringify(customWorkflows)); } catch (e) { console.error('Failed to save workflows', e); }
+    }
+    function loadWorkflows() {
+      try {
+        const data = localStorage.getItem('customWorkflows');
+        if (!data) return;
+        const stored = JSON.parse(data);
+        Object.keys(stored).forEach(name => {
+          customWorkflows[name] = stored[name];
+          const btn = document.createElement('button');
+          btn.className = 'btn';
+          btn.textContent = '🚀 Run ' + name;
+          btn.onclick = () => runWorkflow(customWorkflows[name]);
+          document.querySelector('section[style*="Workflows"]').appendChild(btn);
+        });
+      } catch (e) { console.error('Failed to load workflows', e); }
+    }
+
+    const workflowX_temperature = [175, 180, 185, 190, 195];
+    const workflowX_holdTimeInMilliSeconds = [10000, 7000, 7000, 7000, 7000];
+    const workflowX_pumpTimeInMilliSeconds = [5000, 6000, 7000, 8000, 8000];
+
+    function log(msg) {
+      const now = new Date();
+      const time = now.toLocaleTimeString('de-DE', { hour12: false });
+      const el = document.getElementById('log');
+      el.innerText += `[${time}] ${msg}\n`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+    function updateProgress(percent){
+      const bar = document.getElementById('progress');
+      if (bar) bar.style.width = Math.max(0, Math.min(100, percent)) + '%';
+    }
+
+    let progressTotalSteps = 0; let progressCurrentStep = 0;
+    function startProgressSteps(totalSteps){ progressTotalSteps = totalSteps; progressCurrentStep = 0; updateProgress(0); }
+    function advanceProgressStep(){ progressCurrentStep++; if (progressTotalSteps>0){ updateProgress(Math.min((progressCurrentStep/progressTotalSteps)*100,100)); } }
+    function stopProgress(){ progressTotalSteps = 0; progressCurrentStep = 0; updateProgress(0); }
+
+    async function getCurrentTemp(){
+      const char = await service.getCharacteristic('10110001-5354-4f52-5a26-4249434b454c');
+      const value = await char.readValue();
+      return new DataView(value.buffer).getUint16(0, true);
+    }
+
+    async function estimateTotalTime(temps, holds, pumps){
+      let total = 0; let current = await getCurrentTemp();
+      for (let i=0; i<temps.length; i++){
+        const target = temps[i]*10; const heatTime = Math.max(target-current,0)*5; // heuristic
+        total += heatTime + holds[i] + pumps[i]; current = target;
+      }
+      return total;
+    }
+
+    function clearLog(){ document.getElementById('log').innerText=''; }
+
+    async function setManualTemperature(){
+      const val = parseInt(document.getElementById('manualTemp').value, 10);
+      if (isNaN(val)){ log('⚠️ Enter a valid temperature'); return; }
+      await setTemperature(val*10);
+      await startHeater();
+    }
+
+    function syncPumpButtons(){
+      const top = document.getElementById('pumpToggle');
+      const bottom = document.getElementById('pumpToggleBottom');
+      const label = pumpRunning ? 'Stop Pump' : 'Start Pump';
+      if (top){ top.innerText = label; top.setAttribute('aria-pressed', String(pumpRunning)); }
+      if (bottom){ bottom.innerText = pumpRunning ? '🛑 Pump' : '💨 Pump'; bottom.setAttribute('aria-pressed', String(pumpRunning)); }
+      document.getElementById('pumpStatus').innerText = pumpRunning ? 'ON' : 'OFF';
+    }
+
+    async function togglePump(){ if (!pumpRunning){ await startPumpOnly(); } else { await stopPump(); } }
+
+    async function wait(ms){ const interval=100; const steps=Math.floor(ms/interval); for (let i=0;i<steps;i++){ if (abortFlag) throw new Error('Aborted'); await sleep(interval); } }
+
+    async function connect(){
+      try{
+        const storedId = localStorage.getItem('volcanoDeviceId');
+        if (storedId){ const devices = await navigator.bluetooth.getDevices(); device = devices.find(d=>d.id===storedId); }
+        if (!device){
+          device = await navigator.bluetooth.requestDevice({ acceptAllDevices:true, optionalServices:[serviceUUID,'10100000-5354-4f52-5a26-4249434b454c'] });
+          // localStorage.setItem('volcanoDeviceId', device.id);
+        }
+        document.getElementById('status').innerText = `Status: Connecting to ${device.name}...`;
+        server = await device.gatt.connect();
+        service = await server.getPrimaryService(serviceUUID);
+        document.getElementById('status').innerText = `Status: Connected to ${device.name}`;
+        log('Connected to device: ' + device.name);
+        await readFirmwareVersion();
+        polling = true; pollStatuses();
+        if (navigator.vibrate) navigator.vibrate(20);
+      }catch(err){ document.getElementById('status').innerText = `Connection failed: ${err.message}`; log('Connection error: ' + err); }
+    }
+
+    async function readFirmwareVersion(){
+      try{
+        const fwService = await server.getPrimaryService('10100000-5354-4f52-5a26-4249434b454c');
+        const fwChar = await fwService.getCharacteristic('10100003-5354-4f52-5a26-4249434b454c');
+        const value = await fwChar.readValue();
+        const decoder = new TextDecoder('utf-8');
+        const fw = decoder.decode(value);
+        document.getElementById('firmwareVersion').innerText = fw.substring(0,8);
+        log('🆕 Firmware Version: ' + fw);
+      }catch(e){ log('⚠️ Error reading firmware version: ' + e); }
+    }
+
+    async function runWorkflow(config){
+      const temps=config.temperature; const holds=config.holdTimeInMilliSeconds; const pumps=config.pumpTimeInMilliSeconds;
+      workflowActive = true; abortFlag = false; log(`========= START ${config.name||'WORKFLOW'} =========`);
+      try{
+        startProgressSteps(temps.length);
+        await stopPump(); await sleep(300); await stopHeater(); await sleep(300);
+        for (let i=0;i<temps.length;i++){
+          if (abortFlag) throw new Error('Aborted');
+          const targetTemp=temps[i]*10; const holdTime=holds[i]; const pumpTime=pumps[i];
+          log(`🧭 STEP ${i+1}: Target ${targetTemp/10}°C, Hold ${holdTime}ms, Pump ${pumpTime}ms`);
+          await stopPump(); await sleep(300);
+          await setTemperature(targetTemp); await wait(2000); if (abortFlag) throw new Error('Aborted');
+          await startHeater(); await wait(500);
+          await waitForTemp(targetTemp); if (abortFlag) throw new Error('Aborted');
+          log(`⏳ Holding for ${holdTime}ms`); await preciseWait(holdTime); if (abortFlag) throw new Error('Aborted');
+          if (pumpTime>0){ await startPumpOnly(); log(`💨 Pumping for ${pumpTime}ms`); await preciseWait(pumpTime); await stopPump(); log('🛑 Pump OFF'); }
+          else { log('⏭️ Skipping pump phase'); }
+          await wait(500); advanceProgressStep();
+        }
+        await stopPump(); await stopHeater(); stopProgress(); updateProgress(100); log('✅ Workflow completed.');
+        if (navigator.vibrate) navigator.vibrate([20,60,20]);
+      }catch(e){
+        if (e.message==='Aborted'){ log('❌ Workflow aborted.'); await stopPump(); await stopHeater(); stopProgress(); updateProgress(0); }
+        else { log('⚠️ Error during workflow: ' + e); }
+      }finally{ workflowActive=false; stopProgress(); }
+    }
+
+    function runWorkflowX(){
+      runWorkflow({ name:'Workflow X', temperature:workflowX_temperature, holdTimeInMilliSeconds:workflowX_holdTimeInMilliSeconds, pumpTimeInMilliSeconds:workflowX_pumpTimeInMilliSeconds });
+    }
+
+    function addCustomWorkflow(){
+      const name = prompt('Workflow name:'); if (!name) return;
+      const tempInput = prompt('Temperatures (comma separated °C):'); if (!tempInput) return;
+      const holdInput = prompt('Hold times (comma separated ms):'); if (!holdInput) return;
+      const pumpInput = prompt('Pump times (comma separated ms, max 35000):'); if (!pumpInput) return;
+      const temps = tempInput.split(',').map(v=>parseInt(v.trim(),10));
+      const holds = holdInput.split(',').map(v=>parseInt(v.trim(),10));
+      const pumps = pumpInput.split(',').map(v=>parseInt(v.trim(),10));
+      if (temps.length!==holds.length || temps.length!==pumps.length){ alert('Arrays must be of equal length'); return; }
+      if (pumps.some(p=>isNaN(p)||p>35000)){ alert('Pump times must be numbers ≤ 35000'); return; }
+      customWorkflows[name] = { name, temperature:temps, holdTimeInMilliSeconds:holds, pumpTimeInMilliSeconds:pumps };
+      saveWorkflows();
+      const btn = document.createElement('button'); btn.className='btn'; btn.textContent='🚀 Run ' + name; btn.onclick=()=>runWorkflow(customWorkflows[name]);
+      document.querySelector('section[style*="Workflows"]').appendChild(btn);
+      log('Added workflow ' + name);
+    }
+
+    function abortWorkflow(){ log('❌ Abort requested.'); abortFlag = true; }
+
+    async function setTemperature(tempInTenthDegrees){
+      const char = await service.getCharacteristic('10110003-5354-4f52-5a26-4249434b454c');
+      const buffer = new ArrayBuffer(2); new DataView(buffer).setUint16(0, tempInTenthDegrees, true);
+      await char.writeValue(buffer); log(`🌡️ Set temperature to ${tempInTenthDegrees/10}°C`);
+    }
+
+    async function startHeater(){
+      const char = await service.getCharacteristic('1011000f-5354-4f52-5a26-4249434b454c');
+      await char.writeValue(new Uint8Array([0x01])); log('🔥 Heater ON');
+    }
+    async function stopHeater(){
+      const char = await service.getCharacteristic('10110010-5354-4f52-5a26-4249434b454c');
+      await char.writeValue(new Uint8Array([0x01])); log('🛑 Heater OFF');
+    }
+
+    async function waitForTemp(targetTemp){
+      const char = await service.getCharacteristic('10110001-5354-4f52-5a26-4249434b454c');
+      let temp = 0;
+      while (Math.abs(temp - targetTemp) > 10){
+        if (abortFlag) throw new Error('Aborted');
+        const value = await char.readValue();
+        temp = new DataView(value.buffer).getUint16(0, true);
+        document.getElementById('currentTemp').innerText = (temp/10).toFixed(1);
+        log(`Current temp: ${temp/10}°C`);
+        await wait(1500);
+      }
+      log('✅ Target temperature reached');
+    }
+
+    let pumpSafetyTimer = null;
+    async function startPumpOnly(){
+      const char = await service.getCharacteristic(pumpOnUUID);
+      await char.writeValue(new Uint8Array([0x01]));
+      pumpRunning = true; syncPumpButtons(); log('💨 Pump ON');
+      pumpSafetyTimer = setTimeout(()=>{ stopPump(); log('⛑️ Failsafe: Pump auto-stopped after timeout'); }, 20000);
+    }
+    async function stopPump(){
+      if (pumpSafetyTimer){ clearTimeout(pumpSafetyTimer); pumpSafetyTimer=null; }
+      const char = await service.getCharacteristic(pumpOffUUID);
+      await char.writeValue(new Uint8Array([0x00]));
+      pumpRunning = false; syncPumpButtons(); log('🛑 Pump OFF');
+    }
+
+    async function updateStatuses(){
+      try{
+        const tempChar = await service.getCharacteristic('10110001-5354-4f52-5a26-4249434b454c');
+        const tempVal = await tempChar.readValue();
+        const temp = new DataView(tempVal.buffer).getUint16(0, true);
+        document.getElementById('currentTemp').innerText = (temp/10).toFixed(1);
+        const prj2Char = await server.getPrimaryService('10100000-5354-4f52-5a26-4249434b454c').then(svc=>svc.getCharacteristic('1010000d-5354-4f52-5a26-4249434b454c'));
+        const prj2Val = await prj2Char.readValue();
+        const prj2 = new DataView(prj2Val.buffer).getUint16(0, true);
+        const heaterOn = (prj2 & 0x0004) === 0; // per your original logic
+        document.getElementById('heaterStatus').innerText = heaterOn ? 'ON' : 'OFF';
+      }catch(err){ log('⚠️ Error updating statuses: ' + err); }
+    }
+
+    async function pollStatuses(){ while (polling){ if (!workflowActive){ await updateStatuses(); } await sleep(3000); } }
+
+    async function preciseWait(ms){ const start=performance.now(); while (performance.now()-start<ms){ if (abortFlag) throw new Error('Aborted'); await sleep(50); } }
+
+    // Initialize
+    loadWorkflows();
+  </script>
+</body>
+</html>
