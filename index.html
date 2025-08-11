@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.10 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.11 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -89,7 +89,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.10 · Mobile‑first</div>
+      <div class="version">v2.11 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -153,7 +153,39 @@
     let abortFlag = false;
     let workflowActive = false;
     let polling = false;
-    let pumpRunning = false;
+    $1
+    // --- Audio feedback setup ---
+    let audioCtx = null;
+    function getAudioCtx(){
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
+    }
+    // Ensure audio is allowed after the first user interaction
+    window.addEventListener('pointerdown', () => { try { getAudioCtx().resume(); } catch(_){} }, { once:true });
+
+    function playCompletionSound(){
+      try{
+        const ctx = getAudioCtx();
+        const now = ctx.currentTime;
+        const master = ctx.createGain();
+        master.gain.value = 0.08; // gentle volume
+        master.connect(ctx.destination);
+        const freqs = [523.25, 659.25, 783.99]; // C5, E5, G5
+        freqs.forEach((f, i) => {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type = 'sine';
+          o.frequency.value = f;
+          o.connect(g); g.connect(master);
+          const t = now + i*0.06;
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(1, t + 0.01);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+          o.start(t);
+          o.stop(t + 0.24);
+        });
+      }catch(e){ console.warn('Sound playback failed:', e); }
+    }
 
     const serviceUUID = '10110000-5354-4f52-5a26-4249434b454c';
     const pumpOnUUID = '10110013-5354-4f52-5a26-4249434b454c';
@@ -188,8 +220,11 @@
       const now = new Date();
       const time = now.toLocaleTimeString('de-DE', { hour12: false });
       const el = document.getElementById('log');
-      el.innerText += `[${time}] ${msg}\n`;
-      el.scrollTop = el.scrollHeight;
+      const line = document.createElement('div');
+      line.textContent = `[${time}] ${msg}`;
+      el.appendChild(line);
+      // Always keep the newest entry visible
+      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
     }
 
     function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
@@ -292,6 +327,7 @@
           await wait(500); advanceProgressStep();
         }
         await stopPump(); await stopHeater(); stopProgress(); updateProgress(100); log('✅ Workflow completed.');
+        playCompletionSound();
         if (navigator.vibrate) navigator.vibrate([20,60,20]);
       }catch(e){
         if (e.message==='Aborted'){ log('❌ Workflow aborted.'); await stopPump(); await stopHeater(); stopProgress(); updateProgress(0); }
