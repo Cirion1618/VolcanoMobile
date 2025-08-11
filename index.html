@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.15 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.16 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -102,7 +102,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.15 · Mobile‑first</div>
+      <div class="version">v2.16 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -254,6 +254,31 @@
     const pumpOnUUID = '10110013-5354-4f52-5a26-4249434b454c';
     const pumpOffUUID = '10110014-5354-4f52-5a26-4249434b454c';
 
+    // Additional UUIDs & connection hints
+    const firmwareServiceUUID = '10100000-5354-4f52-5a26-4249434b454c';
+    const namePrefixHint = null; // e.g., 'Volcano' to narrow chooser (optional)
+
+    // Persist & restore previously authorized device
+    function persistKnownDevice(dev){
+      try{
+        localStorage.setItem('volcanoDeviceId', dev.id);
+        localStorage.setItem('volcanoDeviceName', dev.name || '');
+        localStorage.setItem('volcanoDeviceLastSeen', String(Date.now()));
+      }catch(e){}
+    }
+    async function tryGetKnownDevice(){
+      try{
+        if (!navigator.bluetooth.getDevices) return null;
+        const id = localStorage.getItem('volcanoDeviceId');
+        const name = localStorage.getItem('volcanoDeviceName');
+        const devices = await navigator.bluetooth.getDevices();
+        let found = null;
+        if (id) found = devices.find(d => d.id === id);
+        if (!found && name) found = devices.find(d => (d.name||'') === name);
+        return found || null;
+      }catch(e){ return null; }
+    }
+
     const customWorkflows = {};
 
     function saveWorkflows() {
@@ -350,17 +375,38 @@
 
     async function connect(){
       try{
-        const storedId = localStorage.getItem('volcanoDeviceId');
-        if (storedId){ const devices = await navigator.bluetooth.getDevices(); device = devices.find(d=>d.id===storedId); }
-        if (!device){
-          device = await navigator.bluetooth.requestDevice({ acceptAllDevices:true, optionalServices:[serviceUUID,'10100000-5354-4f52-5a26-4249434b454c'] });
-          // localStorage.setItem('volcanoDeviceId', device.id);
+        // 1) Try previously authorized device (no chooser)
+        let known = null;
+        try{ if (navigator.bluetooth.getDevices) known = await tryGetKnownDevice(); }catch(_){}
+        if (!device && known){
+          device = known;
+          log('🔁 Using previously authorized device: ' + (device.name || device.id));
         }
-        document.getElementById('status').innerText = `Status: Connecting to ${device.name}...`;
+
+        // 2) If none, open chooser with filters (narrow the list)
+        if (!device){
+          const filters = [{ services: [serviceUUID] }];
+          if (namePrefixHint){ filters.push({ namePrefix: namePrefixHint, services: [serviceUUID] }); }
+          device = await navigator.bluetooth.requestDevice({
+            filters,
+            optionalServices: [firmwareServiceUUID, serviceUUID]
+          });
+          log('📶 Selected device: ' + (device.name || device.id));
+        }
+
+        document.getElementById('status').innerText = `Status: Connecting to ${device.name || 'device'}...`;
         server = await device.gatt.connect();
         service = await server.getPrimaryService(serviceUUID);
-        document.getElementById('status').innerText = `Status: Connected to ${device.name}`;
-        log('Connected to device: ' + device.name);
+        document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
+        log('Connected to device: ' + (device.name || device.id));
+
+        // Remember device for next time
+        persistKnownDevice(device);
+        device.addEventListener('gattserverdisconnected', () => {
+          document.getElementById('status').innerText = 'Status: Disconnected';
+          log('🔌 Disconnected');
+        });
+
         await readFirmwareVersion();
         polling = true; pollStatuses();
         if (navigator.vibrate) navigator.vibrate(20);
@@ -369,7 +415,7 @@
 
     async function readFirmwareVersion(){
       try{
-        const fwService = await server.getPrimaryService('10100000-5354-4f52-5a26-4249434b454c');
+        const fwService = await server.getPrimaryService(firmwareServiceUUID);
         const fwChar = await fwService.getCharacteristic('10100003-5354-4f52-5a26-4249434b454c');
         const value = await fwChar.readValue();
         const decoder = new TextDecoder('utf-8');
