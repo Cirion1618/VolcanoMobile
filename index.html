@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.16 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.17 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -102,7 +102,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.16 · Mobile‑first</div>
+      <div class="version">v2.17 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -258,6 +258,15 @@
     const firmwareServiceUUID = '10100000-5354-4f52-5a26-4249434b454c';
     const namePrefixHint = null; // e.g., 'Volcano' to narrow chooser (optional)
 
+    function forgetKnownDevice(){
+      try{
+        localStorage.removeItem('volcanoDeviceId');
+        localStorage.removeItem('volcanoDeviceName');
+        localStorage.removeItem('volcanoDeviceLastSeen');
+        log('🧹 Cleared remembered device.');
+      }catch(_){}
+    }
+
     // Persist & restore previously authorized device
     function persistKnownDevice(dev){
       try{
@@ -375,37 +384,79 @@
 
     async function connect(){
       try{
+        // Reset previous handles for a clean start
+        server = null; service = null;
+
+        // Short-circuit if we're already connected
+        if (device?.gatt?.connected){
+          try {
+            server = device.gatt;
+            service = await server.getPrimaryService(serviceUUID);
+            document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
+            log('🔗 Already connected.');
+            return;
+          } catch(_) { /* fall through to reconnect */ }
+        }
+
         // 1) Try previously authorized device (no chooser)
         let known = null;
         try{ if (navigator.bluetooth.getDevices) known = await tryGetKnownDevice(); }catch(_){}
-        if (!device && known){
+        if (known){
           device = known;
-          log('🔁 Using previously authorized device: ' + (device.name || device.id));
+          log('🔁 Trying previously authorized device: ' + (device.name || device.id));
+          try{
+            server = await device.gatt.connect();
+          }catch(e){
+            log('⚠️ Known device connect failed: ' + e.message);
+            // If connect fails, forget and fall back to chooser
+            try { device.gatt.disconnect(); } catch(_){}
+            device = null;
+          }
         }
 
-        // 2) If none, open chooser with filters (narrow the list)
-        if (!device){
-          const filters = [{ services: [serviceUUID] }];
-          if (namePrefixHint){ filters.push({ namePrefix: namePrefixHint, services: [serviceUUID] }); }
-          device = await navigator.bluetooth.requestDevice({
-            filters,
-            optionalServices: [firmwareServiceUUID, serviceUUID]
-          });
-          log('📶 Selected device: ' + (device.name || device.id));
+        // 2) If still no server, open chooser (filtered first, then fallback)
+        if (!server){
+          try{
+            const filters = namePrefixHint
+              ? [{ namePrefix: namePrefixHint, services: [serviceUUID] }]
+              : [{ services: [serviceUUID] }];
+            device = await navigator.bluetooth.requestDevice({
+              filters,
+              optionalServices: [firmwareServiceUUID, serviceUUID]
+            });
+            log('📶 Selected device (filtered): ' + (device.name || device.id));
+          }catch(e){
+            if (e.name === 'NotFoundError'){
+              log('ℹ️ No matching device via filtered chooser, falling back to all devices...');
+            }else{
+              log('⚠️ Filtered chooser error: ' + e.message + ' — falling back to all devices');
+            }
+          }
+
+          if (!device){
+            // Fallback: show all devices, but request our services
+            device = await navigator.bluetooth.requestDevice({
+              acceptAllDevices: true,
+              optionalServices: [firmwareServiceUUID, serviceUUID]
+            });
+            log('📶 Selected device (all): ' + (device.name || device.id));
+          }
+
+          server = await device.gatt.connect();
         }
 
-        document.getElementById('status').innerText = `Status: Connecting to ${device.name || 'device'}...`;
-        server = await device.gatt.connect();
+        // Get our primary service
         service = await server.getPrimaryService(serviceUUID);
-        document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
-        log('Connected to device: ' + (device.name || device.id));
 
-        // Remember device for next time
+        document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
+        log('✅ Connected to device: ' + (device.name || device.id));
+
+        // Remember device for next time & listen for disconnects
         persistKnownDevice(device);
         device.addEventListener('gattserverdisconnected', () => {
           document.getElementById('status').innerText = 'Status: Disconnected';
           log('🔌 Disconnected');
-        });
+        }, { once:false });
 
         await readFirmwareVersion();
         polling = true; pollStatuses();
@@ -560,7 +611,7 @@
         const tempVal = await tempChar.readValue();
         const temp = new DataView(tempVal.buffer).getUint16(0, true);
         document.getElementById('currentTemp').innerText = (temp/10).toFixed(1);
-        const prj2Char = await server.getPrimaryService('10100000-5354-4f52-5a26-4249434b454c').then(svc=>svc.getCharacteristic('1010000d-5354-4f52-5a26-4249434b454c'));
+        const prj2Char = await server.getPrimaryService(firmwareServiceUUID).then(svc=>svc.getCharacteristic('1010000d-5354-4f52-5a26-4249434b454c'));
         const prj2Val = await prj2Char.readValue();
         const prj2 = new DataView(prj2Val.buffer).getUint16(0, true);
         const heaterOn = (prj2 & 0x0004) === 0; // per your original logic
