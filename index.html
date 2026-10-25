@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.20 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.21 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -56,11 +56,13 @@
     .row.wrap{ flex-wrap:wrap; }
     .grow{ flex:1 1 160px; }
 
-    .btn{ background:var(--panel-2); cursor:pointer; }
-    .btn:hover{ filter:brightness(1.08); }
-    .btn-primary{ background:var(--brand); color:#0a0a0a; border-color:transparent; }
-    .btn-danger{ background:var(--danger); color:#fff; border-color:transparent; }
+    .btn{ background:var(--panel-2); cursor:pointer; transition: opacity 0.15s ease, filter 0.15s ease; }
+    .btn:hover:not(:disabled){ filter:brightness(1.08); }
+    .btn:disabled{ opacity:0.45; cursor:not-allowed; }
+    .btn-primary{ background:var(--brand); color:#0a0a0a; border-color:transparent; font-weight:600; }
+    .btn-danger{ background:var(--danger); color:#fff; border-color:transparent; font-weight:600; }
     .btn-ghost{ background:transparent; }
+    .btn-sm{ padding:6px 12px; min-height:32px; font-size:12px; border-radius:8px; }
 
     /* Progress */
     #progressContainer{ width:100%; height:16px; background:var(--panel-2); border-radius:999px; border:1px solid var(--border); overflow:hidden; }
@@ -69,7 +71,7 @@
 
     /* Log (collapsible) */
     details.log{ background:var(--panel); border:1px solid var(--border); border-radius:12px; }
-    details.log>summary{ list-style:none; cursor:pointer; padding:12px 14px; display:flex; gap:10px; align-items:center; }
+    details.log>summary{ list-style:none; cursor:pointer; padding:10px 14px; display:flex; justify-content:space-between; gap:10px; align-items:center; }
     details.log>summary::-webkit-details-marker{ display:none; }
     #log{ max-height:240px; overflow:auto; background:var(--panel-2); border-top:1px solid var(--border); padding:12px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:12px; border-radius:0 0 12px 12px; }
 
@@ -80,7 +82,7 @@
       padding:8px 12px calc(8px + env(safe-area-inset-bottom));
     }
     .toolbar .row{ display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; }
-    @media (min-width:720px){ .toolbar .row{ grid-template-columns:repeat(5, max-content); justify-content:center; } }
+    @media (min-width:720px){ .toolbar .row{ grid-template-columns:repeat(4, max-content); justify-content:center; } }
 
     /* Workflow manager dialog */
     dialog{ border:1px solid var(--border); border-radius:12px; padding:0; background:var(--panel); color:var(--text); width:min(820px,96vw); }
@@ -102,7 +104,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.20 · Mobile‑first</div>
+      <div class="version">v2.21 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -116,25 +118,15 @@
       <div class="card"><div class="label">Firmware</div><div class="value" id="firmwareVersion">-</div></div>
     </section>
 
-    <!-- Manual controls -->
+    <!-- Progress & Log -->
     <section style="margin-top:16px; display:grid; gap:8px;">
-      <!--
-      <div class="row wrap">
-        <label class="grow" for="manualTemp" style="display:flex; flex-direction:column; gap:6px;">
-          <span class="label">Manual Temp (°C)</span>
-          <input type="number" id="manualTemp" inputmode="numeric" placeholder="e.g. 185" min="40" max="230" step="1" />
-        </label>
-        <button class="btn btn-primary" id="btnSetTemp" aria-label="Set temperature" onclick="setManualTemperature()">Set Temp</button>
-        <button class="btn" id="pumpToggle" aria-pressed="false" onclick="togglePump()">Start Pump</button>
-      </div>
-      -->
-
       <div id="progressContainer" aria-label="Workflow progress"><div id="progress"></div></div>
 
-      <!-- Log now directly under progress bar -->
+      <!-- Log with inline Clear button in summary -->
       <details class="log" open style="margin-top:8px;">
         <summary>
           <span>Event Log</span>
+          <button type="button" class="btn btn-sm" onclick="event.stopPropagation(); clearLog();">Clear</button>
         </summary>
         <div id="log" role="log" aria-live="polite"></div>
       </details>
@@ -142,10 +134,9 @@
 
     <!-- Workflows -->
     <section id="workflows" style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-      <button class="btn" onclick="runWorkflowX()">🚀 Start Custom Workflow X</button>
+      <button class="btn wf-start-btn" onclick="runWorkflowX()">🚀 Start Custom Workflow X</button>
       <button class="btn" onclick="addCustomWorkflow()">➕ Add Workflow</button>
       <button class="btn" onclick="openWorkflowManager()">🗂 Manage Workflows</button>
-      <button class="btn" onclick="clearLog()">🧹 Clear Log</button>
       <span id="customRunButtons" style="display:contents"></span>
     </section>
   </main>
@@ -155,7 +146,7 @@
     <div class="dialog-header">
       <div><strong>Manage Workflows</strong></div>
       <div class="row">
-        <button class="btn" onclick="closeWorkflowManager()">Close</button>
+        <button class="btn btn-sm" onclick="closeWorkflowManager()">Close</button>
       </div>
     </div>
     <div class="dialog-body">
@@ -163,26 +154,29 @@
     </div>
   </dialog>
 
-  <!-- Toast root (created dynamically if missing) -->
-
   <!-- Bottom reachable toolbar -->
   <nav class="toolbar" aria-label="Primary actions">
     <div class="row">
-      <button class="btn" onclick="connect()">🔗 Connect</button>
-      <button class="btn btn-primary" onclick="runWorkflowX()">▶️ Start</button>
-      <button class="btn btn-danger" onclick="abortWorkflow()">⛔ Abort</button>
+      <button class="btn" id="btnConnect" onclick="connect()">🔗 Connect</button>
+      <button class="btn btn-primary wf-start-btn" onclick="runWorkflowX()">▶️ Start</button>
+      <button class="btn btn-danger" id="btnAbort" onclick="abortWorkflow()" disabled>⛔ Abort</button>
       <button class="btn" id="pumpToggleBottom" onclick="togglePump()">💨 Pump</button>
-      <button class="btn" style="display:none;" id="clearBottom" onclick="clearLog()">🧹</button>
     </div>
   </nav>
 
   <script>
-    // --- Original logic kept, UI improved for mobile ---
-    let server, service, device;
+    // --- State variables ---
+    let server = null, service = null, device = null;
     let abortFlag = false;
     let workflowActive = false;
     let polling = false;
-    let pumpRunning = false; // ensure declared
+    let pumpRunning = false;
+
+    // --- UUIDs ---
+    const serviceUUID = '10110000-5354-4f52-5a26-4249434b454c';
+    const firmwareServiceUUID = '10100000-5354-4f52-5a26-4249434b454c';
+    const pumpOnUUID = '10110013-5354-4f52-5a26-4249434b454c';
+    const pumpOffUUID = '10110014-5354-4f52-5a26-4249434b454c';
 
     // --- Audio feedback + popup/notification ---
     let audioCtx = null;
@@ -190,7 +184,6 @@
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       return audioCtx;
     }
-    // Ensure audio is allowed after the first user interaction
     window.addEventListener('pointerdown', () => { try { getAudioCtx().resume(); } catch(_){} }, { once:true });
 
     function playCompletionSound(){
@@ -198,7 +191,7 @@
         const ctx = getAudioCtx();
         const now = ctx.currentTime;
         const master = ctx.createGain();
-        master.gain.value = 0.08; // gentle volume
+        master.gain.value = 0.08;
         master.connect(ctx.destination);
         const freqs = [523.25, 659.25, 783.99]; // C5, E5, G5
         freqs.forEach((f, i) => {
@@ -250,47 +243,6 @@
       showToast('✅ Workflow completed');
     }
 
-    const serviceUUID = '10110000-5354-4f52-5a26-4249434b454c';
-    const pumpOnUUID = '10110013-5354-4f52-5a26-4249434b454c';
-    const pumpOffUUID = '10110014-5354-4f52-5a26-4249434b454c';
-
-    // Additional UUIDs & connection hints
-    const firmwareServiceUUID = '10100000-5354-4f52-5a26-4249434b454c';
-    const namePrefixHint = null; // e.g., 'Volcano' to narrow chooser (optional)
-
-    function forgetKnownDevice(){
-      try{
-        localStorage.removeItem('volcanoDeviceId');
-        localStorage.removeItem('volcanoDeviceName');
-        localStorage.removeItem('volcanoDeviceLastSeen');
-        localStorage.removeItem('volcanoDeviceServices');
-        log('🧹 Cleared remembered device.');
-      }catch(_){ }
-    }
-
-    // Persist & restore previously authorized device
-    function persistKnownDevice(dev){
-      try{
-        localStorage.setItem('volcanoDeviceId', dev.id);
-        localStorage.setItem('volcanoDeviceName', dev.name || '');
-        localStorage.setItem('volcanoDeviceLastSeen', String(Date.now()));
-        const svcs = Array.isArray(dev.uuids) ? dev.uuids : (dev.uuids ? [dev.uuids] : []);
-        localStorage.setItem('volcanoDeviceServices', JSON.stringify(svcs));
-      }catch(e){ }
-    }
-    async function tryGetKnownDevice(){
-      try{
-        if (!navigator.bluetooth.getDevices) return null;
-        const id = localStorage.getItem('volcanoDeviceId');
-        const name = localStorage.getItem('volcanoDeviceName');
-        const devices = await navigator.bluetooth.getDevices();
-        let found = null;
-        if (id) found = devices.find(d => d.id === id);
-        if (!found && name) found = devices.find(d => (d.name||'') === name);
-        return found || null;
-      }catch(e){ return null; }
-    }
-
     // --- Error helpers ---
     function errInfo(e){
       try{
@@ -301,6 +253,16 @@
     }
     function logError(prefix, e){ log(`${prefix}: ${errInfo(e)}`); try{ console.error(prefix, e); }catch(_){ } }
 
+    // --- UI Lock helper to prevent double workflow execution ---
+    function setWorkflowUIState(isRunning){
+      workflowActive = isRunning;
+      const startBtns = document.querySelectorAll('.wf-start-btn');
+      startBtns.forEach(btn => { btn.disabled = isRunning; });
+      const abortBtn = document.getElementById('btnAbort');
+      if (abortBtn) abortBtn.disabled = !isRunning;
+    }
+
+    // --- Workflows state ---
     const customWorkflows = {};
 
     function saveWorkflows() {
@@ -323,8 +285,9 @@
       container.innerHTML = '';
       Object.keys(customWorkflows).forEach(name => {
         const btn = document.createElement('button');
-        btn.className = 'btn';
+        btn.className = 'btn wf-start-btn';
         btn.dataset.runWorkflow = name;
+        btn.disabled = workflowActive;
         btn.textContent = '🚀 Run ' + name;
         btn.onclick = () => runWorkflow(customWorkflows[name]);
         container.appendChild(btn);
@@ -342,10 +305,10 @@
       const line = document.createElement('div');
       line.textContent = `[${time}] ${msg}`;
       el.insertBefore(line, el.firstChild);
-      // Newest on top
       requestAnimationFrame(() => { el.scrollTop = 0; });
     }
 
+    function clearLog(){ document.getElementById('log').innerText=''; }
     function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
     function updateProgress(percent){
@@ -358,165 +321,115 @@
     function advanceProgressStep(){ progressCurrentStep++; if (progressTotalSteps>0){ updateProgress(Math.min((progressCurrentStep/progressTotalSteps)*100,100)); } }
     function stopProgress(){ progressTotalSteps = 0; progressCurrentStep = 0; updateProgress(0); }
 
-    async function getCurrentTemp(){
-      const char = await service.getCharacteristic('10110001-5354-4f52-5a26-4249434b454c');
-      const value = await char.readValue();
-      return new DataView(value.buffer).getUint16(0, true);
-    }
-
-    async function estimateTotalTime(temps, holds, pumps){
-      let total = 0; let current = await getCurrentTemp();
-      for (let i=0; i<temps.length; i++){
-        const target = temps[i]*10; const heatTime = Math.max(target-current,0)*5; // heuristic
-        total += heatTime + holds[i] + pumps[i]; current = target;
-      }
-      return total;
-    }
-
-    function clearLog(){ document.getElementById('log').innerText=''; }
-
-    async function setManualTemperature(){
-      const val = parseInt(document.getElementById('manualTemp').value, 10);
-      if (isNaN(val)){ log('⚠️ Enter a valid temperature'); return; }
-      await setTemperature(val*10);
-      await startHeater();
-    }
-
     function syncPumpButtons(){
-      const top = document.getElementById('pumpToggle');
       const bottom = document.getElementById('pumpToggleBottom');
-      const label = pumpRunning ? 'Stop Pump' : 'Start Pump';
-      if (top){ top.innerText = label; top.setAttribute('aria-pressed', String(pumpRunning)); }
       if (bottom){ bottom.innerText = pumpRunning ? '🛑 Pump' : '💨 Pump'; bottom.setAttribute('aria-pressed', String(pumpRunning)); }
       document.getElementById('pumpStatus').innerText = pumpRunning ? 'ON' : 'OFF';
     }
 
-    async function togglePump(){ if (!pumpRunning){ await startPumpOnly(); } else { await stopPump(); } }
-
-    async function wait(ms){ const interval=100; const steps=Math.floor(ms/interval); for (let i=0;i<steps;i++){ if (abortFlag) throw new Error('Aborted'); await sleep(interval); } }
-
-    // --- Known-device connect helper with retry/backoff ---
-    async function connectKnownDevice(dev){
-      for (let attempt = 1; attempt <= 3; attempt++){
-        try{
-          if (dev.gatt.connected){
-            server = dev.gatt;
-          } else {
-            try{ dev.gatt.disconnect(); }catch(_){ }
-            server = await dev.gatt.connect();
-          }
-          // Ensure service is accessible (also validates permissions)
-          service = await server.getPrimaryService(serviceUUID);
-          return true;
-        }catch(e){
-          logError(`Known device connect attempt ${attempt} failed`, e);
-          await sleep(300 * attempt); // backoff
-        }
-      }
-      return false;
+    async function togglePump(){
+      if (!service) { showToast('⚠️ Please connect first'); return; }
+      if (!pumpRunning){ await startPumpOnly(); } else { await stopPump(); }
     }
 
+    async function wait(ms){
+      const interval = 100;
+      const steps = Math.floor(ms / interval);
+      for (let i = 0; i < steps; i++){
+        if (abortFlag) throw new Error('Aborted');
+        await sleep(interval);
+      }
+    }
+
+    // --- Streamlined Connect (Optimized for iOS Bluefy & Web Bluetooth) ---
     async function connect(){
       try{
-        // Clean start
-        server = null; service = null;
-
-        // Already connected?
-        if (device?.gatt?.connected){
-          try {
-            server = device.gatt;
-            service = await server.getPrimaryService(serviceUUID);
-            document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
-            log('🔗 Already connected.');
-            return;
-          } catch(e) { logError('Check existing connection failed', e); }
+        // 1. Check if already connected
+        if (device?.gatt?.connected && service){
+          log('🔗 Already connected to ' + (device.name || device.id));
+          showToast('🔗 Already connected');
+          return;
         }
 
-        // Try previously authorized device (no chooser)
-        let known = null;
-        try{ if (navigator.bluetooth.getDevices) known = await tryGetKnownDevice(); }catch(_){ known = null; }
-        if (known){
-          device = known;
-          log('🔁 Trying known device: ' + (device.name || device.id));
-          const ok = await connectKnownDevice(device);
-          if (!ok){
-            log('ℹ️ Known device path failed — will attempt guided chooser.');
+        // 2. If we still have a reference to the device from earlier in this session, try direct reconnect
+        if (device){
+          log('🔁 Reconnecting to ' + (device.name || device.id) + '...');
+          try {
+            server = await device.gatt.connect();
+            service = await server.getPrimaryService(serviceUUID);
+            onConnected();
+            return;
+          } catch (e) {
+            log('ℹ️ Direct reconnect failed, opening device chooser...');
             device = null; server = null; service = null;
           }
         }
 
-        // Need to show chooser?
-        if (!service){
-          // Build full optional services set (previously allowed + required)
-          let optionalAll = [serviceUUID, firmwareServiceUUID];
-          try{
-            const storedSvcs = JSON.parse(localStorage.getItem('volcanoDeviceServices') || '[]');
-            optionalAll = Array.from(new Set(optionalAll.concat(storedSvcs)));
-          }catch(_){ }
-
-          const storedName = localStorage.getItem('volcanoDeviceName');
-
-          // 1) Exact-name chooser if we know the name (tiny list, ideally 1 entry)
-          if (storedName){
-            try{
-              device = await navigator.bluetooth.requestDevice({
-                filters: [{ name: storedName }],
-                optionalServices: optionalAll
-              });
-              log('📶 Selected device (name match): ' + (device.name || device.id));
-              const okByName = await connectKnownDevice(device);
-              if (!okByName) throw new Error('Failed to connect to selected name device');
-            }catch(e){
-              log('ℹ️ Name-filter chooser fallback: ' + errInfo(e));
-              device = null;
-            }
+        // 3. Request device with targeted Volcano filters (fast & clean list in Bluefy)
+        const optionalAll = [serviceUUID, firmwareServiceUUID];
+        try {
+          device = await navigator.bluetooth.requestDevice({
+            filters: [
+              { services: [serviceUUID] },
+              { services: [firmwareServiceUUID] },
+              { namePrefix: 'S&B' },
+              { namePrefix: 'VOLCANO' },
+              { namePrefix: 'Volcano' }
+            ],
+            optionalServices: optionalAll
+          });
+        } catch (filterErr) {
+          // If the user didn't simply cancel, fall back to acceptAllDevices just in case
+          if (filterErr.name === 'NotFoundError') {
+            document.getElementById('status').innerText = 'Status: Connection cancelled';
+            log('❎ Selection cancelled.');
+            return;
           }
-
-          // 2) If still not connected, use prefix filter if configured
-          if (!service && namePrefixHint){
-            try{
-              device = await navigator.bluetooth.requestDevice({
-                filters: [{ namePrefix: namePrefixHint, services: [serviceUUID] }],
-                optionalServices: optionalAll
-              });
-              log('📶 Selected device (prefix): ' + (device.name || device.id));
-              const okByPrefix = await connectKnownDevice(device);
-              if (!okByPrefix) throw new Error('Failed to connect to selected prefix device');
-            }catch(e){
-              log('ℹ️ Prefix-filter chooser fallback: ' + errInfo(e));
-              device = null;
-            }
-          }
-
-          // 3) Final fallback: unfiltered chooser
-          if (!service){
-            try{
-              device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: optionalAll });
-              log('📶 Selected device (all): ' + (device.name || device.id));
-              const okAll = await connectKnownDevice(device);
-              if (!okAll) throw new Error('Failed to connect to selected device');
-            }catch(e){
-              document.getElementById('status').innerText = 'Status: Connection cancelled';
-              log('❎ User cancelled / no device selected: ' + errInfo(e));
-              return;
-            }
-          }
+          log('ℹ️ Filter fallback: ' + errInfo(filterErr));
+          device = await navigator.bluetooth.requestDevice({
+            acceptAllDevices: true,
+            optionalServices: optionalAll
+          });
         }
 
-        document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
-        log('✅ Connected to device: ' + (device.name || device.id));
+        log('📶 Connecting to ' + (device.name || device.id) + '...');
+        server = await device.gatt.connect();
+        service = await server.getPrimaryService(serviceUUID);
+        onConnected();
 
-        // Persist + disconnect listener
-        persistKnownDevice(device);
-        device.addEventListener('gattserverdisconnected', () => {
-          document.getElementById('status').innerText = 'Status: Disconnected';
-          log('🔌 Disconnected');
-        }, { once:false });
+      } catch(err) {
+        document.getElementById('status').innerText = 'Status: Connection failed';
+        log('⚠️ Connection cancelled or failed: ' + errInfo(err));
+      }
+    }
 
-        await readFirmwareVersion();
-        polling = true; pollStatuses();
-        if (navigator.vibrate) navigator.vibrate(20);
-      }catch(err){ document.getElementById('status').innerText = `Connection failed: ${errInfo(err)}`; log('Connection error: ' + errInfo(err)); }
+    async function onConnected(){
+      document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
+      log('✅ Connected to: ' + (device.name || device.id));
+      showToast('✅ Connected');
+
+      // Ensure we don't attach duplicate listeners
+      device.removeEventListener('gattserverdisconnected', onDisconnected);
+      device.addEventListener('gattserverdisconnected', onDisconnected);
+
+      await readFirmwareVersion();
+      if (!polling){
+        polling = true;
+        pollStatuses();
+      }
+      if (navigator.vibrate) navigator.vibrate(20);
+    }
+
+    function onDisconnected(){
+      polling = false;
+      service = null;
+      server = null;
+      document.getElementById('status').innerText = 'Status: Disconnected';
+      log('🔌 Device disconnected');
+      showToast('🔌 Disconnected');
+      if (workflowActive){
+        abortFlag = true;
+      }
     }
 
     async function readFirmwareVersion(){
@@ -532,36 +445,74 @@
     }
 
     async function runWorkflow(config){
-      const temps=config.temperature; const holds=config.holdTimeInMilliSeconds; const pumps=config.pumpTimeInMilliSeconds;
-      workflowActive = true; abortFlag = false; log(`========= START ${config.name||'WORKFLOW'} =========`);
+      if (workflowActive){
+        log('⚠️ A workflow is already running! Please wait or abort first.');
+        showToast('⚠️ Workflow already running');
+        return;
+      }
+      if (!service || !device?.gatt?.connected){
+        log('⚠️ Not connected to a device.');
+        showToast('⚠️ Connect to Volcano first');
+        return;
+      }
+
+      const temps = config.temperature;
+      const holds = config.holdTimeInMilliSeconds;
+      const pumps = config.pumpTimeInMilliSeconds;
+
+      setWorkflowUIState(true);
+      abortFlag = false;
+      log(`========= START ${config.name||'WORKFLOW'} =========`);
+
       try{
         startProgressSteps(temps.length);
         await stopPump(); await sleep(300); await stopHeater(); await sleep(300);
-        for (let i=0;i<temps.length;i++){
+        for (let i=0; i<temps.length; i++){
           if (abortFlag) throw new Error('Aborted');
-          const targetTemp=temps[i]*10; const holdTime=holds[i]; const pumpTime=pumps[i];
+          const targetTemp = temps[i]*10; const holdTime = holds[i]; const pumpTime = pumps[i];
           log(`🧭 STEP ${i+1}: Target ${targetTemp/10}°C, Hold ${holdTime}ms, Pump ${pumpTime}ms`);
           await stopPump(); await sleep(300);
           await setTemperature(targetTemp); await wait(2000); if (abortFlag) throw new Error('Aborted');
           await startHeater(); await wait(500);
           await waitForTemp(targetTemp); if (abortFlag) throw new Error('Aborted');
           log(`⏳ Holding for ${holdTime}ms`); await preciseWait(holdTime); if (abortFlag) throw new Error('Aborted');
-          if (pumpTime>0){ await startPumpOnly(); log(`💨 Pumping for ${pumpTime}ms`); await preciseWait(pumpTime); await stopPump(); log('🛑 Pump OFF'); }
-          else { log('⏭️ Skipping pump phase'); }
-          await wait(500); advanceProgressStep();
+          if (pumpTime > 0){
+            await startPumpOnly();
+            log(`💨 Pumping for ${pumpTime}ms`);
+            await preciseWait(pumpTime);
+            await stopPump();
+            log('🛑 Pump OFF');
+          } else {
+            log('⏭️ Skipping pump phase');
+          }
+          await wait(500);
+          advanceProgressStep();
         }
         await stopPump(); await stopHeater(); stopProgress(); updateProgress(100); log('✅ Workflow completed.');
         playCompletionSound();
         notifyCompletion();
         if (navigator.vibrate) navigator.vibrate([20,60,20]);
       }catch(e){
-        if (e.message==='Aborted'){ log('❌ Workflow aborted.'); await stopPump(); await stopHeater(); stopProgress(); updateProgress(0); }
-        else { log('⚠️ Error during workflow: ' + errInfo(e)); }
-      }finally{ workflowActive=false; stopProgress(); }
+        if (e.message === 'Aborted'){
+          log('❌ Workflow aborted.');
+          try { await stopPump(); await stopHeater(); } catch(_){}
+          stopProgress(); updateProgress(0);
+        } else {
+          log('⚠️ Error during workflow: ' + errInfo(e));
+        }
+      }finally{
+        setWorkflowUIState(false);
+        stopProgress();
+      }
     }
 
     function runWorkflowX(){
-      runWorkflow({ name:'Workflow X', temperature:workflowX_temperature, holdTimeInMilliSeconds:workflowX_holdTimeInMilliSeconds, pumpTimeInMilliSeconds:workflowX_pumpTimeInMilliSeconds });
+      runWorkflow({
+        name: 'Workflow X',
+        temperature: workflowX_temperature,
+        holdTimeInMilliSeconds: workflowX_holdTimeInMilliSeconds,
+        pumpTimeInMilliSeconds: workflowX_pumpTimeInMilliSeconds
+      });
     }
 
     function promptSteps(){
@@ -615,7 +566,11 @@
       log('Added/Updated workflow ' + name);
     }
 
-    function abortWorkflow(){ log('❌ Abort requested.'); abortFlag = true; }
+    function abortWorkflow(){
+      if (!workflowActive) return;
+      log('❌ Abort requested.');
+      abortFlag = true;
+    }
 
     async function setTemperature(tempInTenthDegrees){
       const char = await service.getCharacteristic('10110003-5354-4f52-5a26-4249434b454c');
@@ -648,19 +603,22 @@
 
     let pumpSafetyTimer = null;
     async function startPumpOnly(){
+      if (pumpSafetyTimer){ clearTimeout(pumpSafetyTimer); pumpSafetyTimer = null; }
       const char = await service.getCharacteristic(pumpOnUUID);
       await char.writeValue(new Uint8Array([0x01]));
       pumpRunning = true; syncPumpButtons(); log('💨 Pump ON');
-      pumpSafetyTimer = setTimeout(()=>{ stopPump(); log('⛑️ Failsafe: Pump auto-stopped after timeout'); }, 20000);
+      // Failsafe set to 36s to allow up to 35s workflow steps
+      pumpSafetyTimer = setTimeout(()=>{ stopPump(); log('⛑️ Failsafe: Pump auto-stopped after 36s timeout'); }, 36000);
     }
     async function stopPump(){
-      if (pumpSafetyTimer){ clearTimeout(pumpSafetyTimer); pumpSafetyTimer=null; }
+      if (pumpSafetyTimer){ clearTimeout(pumpSafetyTimer); pumpSafetyTimer = null; }
       const char = await service.getCharacteristic(pumpOffUUID);
       await char.writeValue(new Uint8Array([0x00]));
       pumpRunning = false; syncPumpButtons(); log('🛑 Pump OFF');
     }
 
     async function updateStatuses(){
+      if (!service || !device?.gatt?.connected) return;
       try{
         const tempChar = await service.getCharacteristic('10110001-5354-4f52-5a26-4249434b454c');
         const tempVal = await tempChar.readValue();
@@ -669,14 +627,27 @@
         const prj2Char = await server.getPrimaryService(firmwareServiceUUID).then(svc=>svc.getCharacteristic('1010000d-5354-4f52-5a26-4249434b454c'));
         const prj2Val = await prj2Char.readValue();
         const prj2 = new DataView(prj2Val.buffer).getUint16(0, true);
-        const heaterOn = (prj2 & 0x0004) === 0; // per your original logic
+        const heaterOn = (prj2 & 0x0004) === 0;
         document.getElementById('heaterStatus').innerText = heaterOn ? 'ON' : 'OFF';
       }catch(err){ log('⚠️ Error updating statuses: ' + errInfo(err)); }
     }
 
-    async function pollStatuses(){ while (polling){ if (!workflowActive){ await updateStatuses(); } await sleep(3000); } }
+    async function pollStatuses(){
+      while (polling){
+        if (!workflowActive && device?.gatt?.connected){
+          await updateStatuses();
+        }
+        await sleep(3000);
+      }
+    }
 
-    async function preciseWait(ms){ const start=performance.now(); while (performance.now()-start<ms){ if (abortFlag) throw new Error('Aborted'); await sleep(50); } }
+    async function preciseWait(ms){
+      const start = performance.now();
+      while (performance.now() - start < ms){
+        if (abortFlag) throw new Error('Aborted');
+        await sleep(50);
+      }
+    }
 
     // ---- Workflow Manager (view/edit/delete/run) ----
     function openWorkflowManager(){ renderWorkflowManager(); const dlg=document.getElementById('workflowDialog'); if (dlg && !dlg.open) dlg.showModal(); }
@@ -700,13 +671,18 @@
       let html = '';
       names.forEach(name => {
         const wf = customWorkflows[name];
-        html += `<details open><summary><strong>${escapeHtml(name)}</strong> — ${wf.temperature.length} steps</summary>`;
-        html += '<div style="margin-top:8px;"><table class="table"><thead><tr><th>#</th><th>Temp (°C)</th><th>Hold (s)</th><th>Pump (s)</th><th>Actions</th></tr></thead><tbody>';
-        for (let i=0;i<wf.temperature.length;i++){
-          html += `<tr><td>${i+1}</td><td>${wf.temperature[i]}</td><td>${fmtSeconds(wf.holdTimeInMilliSeconds[i])}</td><td>${fmtSeconds(wf.pumpTimeInMilliSeconds[i])}</td>` +
-                  `<td><button class=\"btn\" onclick=\"runNamedWorkflow('${encodeURIComponent(name)}')\">Run</button> ` +
-                  `<button class=\"btn\" onclick=\"openEditWorkflow('${encodeURIComponent(name)}')\">Edit</button> ` +
-                  `<button class=\"btn btn-danger\" onclick=\"deleteWorkflow('${encodeURIComponent(name)}')\">Delete</button></td></tr>`;
+        const enc = encodeURIComponent(name);
+        html += `<details open style="margin-bottom:12px; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px;">`;
+        html += `<summary style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; gap:8px; flex-wrap:wrap;">`;
+        html += `<div><strong>${escapeHtml(name)}</strong> <span class="muted">(${wf.temperature.length} steps)</span></div>`;
+        html += `<div class="row" onclick="event.stopPropagation();">` +
+                `<button class="btn btn-sm btn-primary wf-start-btn" ${workflowActive ? 'disabled' : ''} onclick="closeWorkflowManager(); runNamedWorkflow('${enc}')">▶️ Run</button>` +
+                `<button class="btn btn-sm" onclick="openEditWorkflow('${enc}')">✏️ Edit</button>` +
+                `<button class="btn btn-sm btn-danger" onclick="deleteWorkflow('${enc}')">🗑 Delete</button>` +
+                `</div></summary>`;
+        html += '<div style="margin-top:8px;"><table class="table"><thead><tr><th>#</th><th>Temp (°C)</th><th>Hold (s)</th><th>Pump (s)</th></tr></thead><tbody>';
+        for (let i=0; i<wf.temperature.length; i++){
+          html += `<tr><td>${i+1}</td><td>${wf.temperature[i]}</td><td>${fmtSeconds(wf.holdTimeInMilliSeconds[i])}</td><td>${fmtSeconds(wf.pumpTimeInMilliSeconds[i])}</td></tr>`;
         }
         html += '</tbody></table></div></details>';
       });
@@ -714,7 +690,17 @@
     }
 
     function runNamedWorkflow(encodedName){ const name = decodeURIComponent(encodedName); if (customWorkflows[name]) runWorkflow(customWorkflows[name]); }
-    function deleteWorkflow(encodedName){ const name = decodeURIComponent(encodedName); if (!customWorkflows[name]) return; if (confirm(`Delete workflow \"${name}\"?`)){ delete customWorkflows[name]; saveWorkflows(); renderWorkflowButtons(); renderWorkflowManager(); log('🗑 Deleted workflow ' + name); } }
+    function deleteWorkflow(encodedName){
+      const name = decodeURIComponent(encodedName);
+      if (!customWorkflows[name]) return;
+      if (confirm(`Delete workflow "${name}"?`)){
+        delete customWorkflows[name];
+        saveWorkflows();
+        renderWorkflowButtons();
+        renderWorkflowManager();
+        log('🗑 Deleted workflow ' + name);
+      }
+    }
 
     function openEditWorkflow(encodedName){
       const name = decodeURIComponent(encodedName);
@@ -722,36 +708,35 @@
       const dlg=document.getElementById('workflowDialog'); if (dlg && !dlg.open) dlg.showModal();
       const wrap = document.getElementById('workflowList');
       wrap.innerHTML = `
-        <div class=\"row\" style=\"justify-content:space-between; align-items:center; margin-bottom:8px;\">
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:8px;">
           <strong>Edit Workflow: ${escapeHtml(name)}</strong>
-          <div class=\"row\">
-            <button class=\"btn\" onclick=\"renderWorkflowManager()\">Back</button>
+          <div class="row">
+            <button class="btn btn-sm" onclick="renderWorkflowManager()">Back</button>
           </div>
         </div>
         <div>
-          <table class=\"table\">
+          <table class="table">
             <thead><tr><th>#</th><th>Temp (°C)</th><th>Hold (s)</th><th>Pump (s)</th></tr></thead>
-            <tbody id=\"editBody\"></tbody>
+            <tbody id="editBody"></tbody>
           </table>
-          <div class=\"row\" style=\"margin-top:8px; gap:8px;\">
-            <button class=\"btn\" onclick=\"addEditRow()\">➕ Add Step</button>
-            <button class=\"btn btn-danger\" onclick=\"removeEditRow()\">➖ Remove Last</button>
+          <div class="row" style="margin-top:8px; gap:8px;">
+            <button class="btn btn-sm" onclick="addEditRow()">➕ Add Step</button>
+            <button class="btn btn-sm btn-danger" onclick="removeEditRow()">➖ Remove Last</button>
           </div>
-          <div class=\"row\" style=\"margin-top:12px; gap:8px;\">
-            <button class=\"btn btn-primary\" onclick=\"saveEditWorkflow('${encodeURIComponent(name)}')\">💾 Save</button>
-            <button class=\"btn\" onclick=\"renderWorkflowManager()\">Cancel</button>
+          <div class="row" style="margin-top:12px; gap:8px;">
+            <button class="btn btn-primary" onclick="saveEditWorkflow('${encodeURIComponent(name)}')">💾 Save</button>
+            <button class="btn" onclick="renderWorkflowManager()">Cancel</button>
           </div>
-          <p class=\"muted\" style=\"margin-top:8px;\">Between 2 and 8 steps. Pump ≤ 35 s.</p>
+          <p class="muted" style="margin-top:8px;">Between 2 and 8 steps. Pump ≤ 35 s.</p>
         </div>`;
-      // populate rows
       const body = document.getElementById('editBody');
       const steps = wf.temperature.length;
-      for (let i=0;i<steps;i++){
+      for (let i=0; i<steps; i++){
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${i+1}</td>
-          <td><input type=\"number\" min=\"40\" max=\"230\" step=\"1\" value=\"${wf.temperature[i]}\" /></td>
-          <td><input type=\"number\" min=\"0\" step=\"0.1\" value=\"${(wf.holdTimeInMilliSeconds[i]/1000).toFixed(1).replace(/\.0$/, '')}\" /></td>
-          <td><input type=\"number\" min=\"0\" max=\"35\" step=\"0.1\" value=\"${(wf.pumpTimeInMilliSeconds[i]/1000).toFixed(1).replace(/\.0$/, '')}\" /></td>`;
+          <td><input type="number" min="40" max="230" step="1" value="${wf.temperature[i]}" /></td>
+          <td><input type="number" min="0" step="0.1" value="${(wf.holdTimeInMilliSeconds[i]/1000).toFixed(1).replace(/\.0$/, '')}" /></td>
+          <td><input type="number" min="0" max="35" step="0.1" value="${(wf.pumpTimeInMilliSeconds[i]/1000).toFixed(1).replace(/\.0$/, '')}" /></td>`;
         body.appendChild(tr);
       }
     }
@@ -762,10 +747,6 @@
       if (rows.length >= 8){ alert('Maximum 8 steps'); return; }
       const last = rows[rows.length-1];
       const clone = last.cloneNode(true);
-      clone.querySelectorAll('input').forEach((inp) => {
-        // Keep same values as last row for convenience
-        inp.value = inp.value;
-      });
       body.appendChild(clone);
       renumberEditRows();
     }
