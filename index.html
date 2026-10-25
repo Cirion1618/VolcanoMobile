@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Volcano Hybrid Test Control v2.21 (Mobile‑first)</title>
+  <title>Volcano Hybrid Test Control v2.22 (Mobile‑first)</title>
   <style>
     :root{
       --bg:#111213;
@@ -104,7 +104,7 @@
   <header>
     <div>
       <div class="title">Volcano Hybrid – Advanced Control Panel</div>
-      <div class="version">v2.21 · Mobile‑first</div>
+      <div class="version">v2.22 · Mobile‑first</div>
     </div>
     <div class="muted" id="status" aria-live="polite">Status: Not connected</div>
   </header>
@@ -262,6 +262,34 @@
       if (abortBtn) abortBtn.disabled = !isRunning;
     }
 
+    // --- Persist known device name for fast 1-item chooser in Bluefy ---
+    function persistKnownDevice(dev){
+      try{
+        localStorage.setItem('volcanoDeviceId', dev.id);
+        if (dev.name) localStorage.setItem('volcanoDeviceName', dev.name);
+        localStorage.setItem('volcanoDeviceLastSeen', String(Date.now()));
+      }catch(_){ }
+    }
+
+    // --- Known-device connect helper with retry/backoff ---
+    async function connectGattWithRetry(dev){
+      for (let attempt = 1; attempt <= 3; attempt++){
+        try{
+          if (dev.gatt.connected){
+            server = dev.gatt;
+          } else {
+            server = await dev.gatt.connect();
+          }
+          service = await server.getPrimaryService(serviceUUID);
+          return true;
+        }catch(e){
+          logError(`Connect attempt ${attempt} failed`, e);
+          await sleep(300 * attempt);
+        }
+      }
+      return false;
+    }
+
     // --- Workflows state ---
     const customWorkflows = {};
 
@@ -341,74 +369,84 @@
       }
     }
 
-    // --- Streamlined Connect (Optimized for iOS Bluefy & Web Bluetooth) ---
+    // --- Connect (Optimized for iOS Bluefy: Immediate Stored-Name Chooser) ---
     async function connect(){
       try{
-        // 1. Check if already connected
+        // 1. Check if already connected in current session
         if (device?.gatt?.connected && service){
           log('🔗 Already connected to ' + (device.name || device.id));
           showToast('🔗 Already connected');
           return;
         }
 
-        // 2. If we still have a reference to the device from earlier in this session, try direct reconnect
+        // 2. If we still have the device object from earlier in this tab session, reconnect directly
         if (device){
           log('🔁 Reconnecting to ' + (device.name || device.id) + '...');
-          try {
-            server = await device.gatt.connect();
-            service = await server.getPrimaryService(serviceUUID);
-            onConnected();
+          const ok = await connectGattWithRetry(device);
+          if (ok){
+            await onConnected();
             return;
-          } catch (e) {
-            log('ℹ️ Direct reconnect failed, opening device chooser...');
-            device = null; server = null; service = null;
+          }
+          device = null; server = null; service = null;
+        }
+
+        const optionalAll = [serviceUUID, firmwareServiceUUID];
+        const storedName = localStorage.getItem('volcanoDeviceName');
+
+        // 3. Fast path: Exact-name filter if we remember the Volcano's name (shows 1 device immediately)
+        if (storedName){
+          try{
+            log(`🔍 Looking for "${storedName}"...`);
+            device = await navigator.bluetooth.requestDevice({
+              filters: [{ name: storedName }],
+              optionalServices: optionalAll
+            });
+          }catch(e){
+            log('ℹ️ Exact-name chooser cancelled or not found, falling back to full scan...');
+            device = null;
           }
         }
 
-        // 3. Request device with targeted Volcano filters (fast & clean list in Bluefy)
-        const optionalAll = [serviceUUID, firmwareServiceUUID];
-        try {
-          device = await navigator.bluetooth.requestDevice({
-            filters: [
-              { services: [serviceUUID] },
-              { services: [firmwareServiceUUID] },
-              { namePrefix: 'S&B' },
-              { namePrefix: 'VOLCANO' },
-              { namePrefix: 'Volcano' }
-            ],
-            optionalServices: optionalAll
-          });
-        } catch (filterErr) {
-          // If the user didn't simply cancel, fall back to acceptAllDevices just in case
-          if (filterErr.name === 'NotFoundError') {
-            document.getElementById('status').innerText = 'Status: Connection cancelled';
-            log('❎ Selection cancelled.');
-            return;
+        // 4. Fallback: Broad prefix scan or acceptAllDevices if no storedName matched
+        if (!device){
+          try{
+            device = await navigator.bluetooth.requestDevice({
+              filters: [
+                { namePrefix: 'S&B' },
+                { namePrefix: 'Storz' },
+                { namePrefix: 'STORZ' },
+                { namePrefix: 'VOLCANO' },
+                { namePrefix: 'Volcano' }
+              ],
+              optionalServices: optionalAll
+            });
+          }catch(e){
+            // Ultimate fallback: unfiltered list so the device can always be found
+            device = await navigator.bluetooth.requestDevice({
+              acceptAllDevices: true,
+              optionalServices: optionalAll
+            });
           }
-          log('ℹ️ Filter fallback: ' + errInfo(filterErr));
-          device = await navigator.bluetooth.requestDevice({
-            acceptAllDevices: true,
-            optionalServices: optionalAll
-          });
         }
 
         log('📶 Connecting to ' + (device.name || device.id) + '...');
-        server = await device.gatt.connect();
-        service = await server.getPrimaryService(serviceUUID);
-        onConnected();
+        const connectedOk = await connectGattWithRetry(device);
+        if (!connectedOk) throw new Error('Could not establish GATT service connection');
+
+        await onConnected();
 
       } catch(err) {
-        document.getElementById('status').innerText = 'Status: Connection failed';
-        log('⚠️ Connection cancelled or failed: ' + errInfo(err));
+        document.getElementById('status').innerText = 'Status: Connection cancelled/failed';
+        log('❎ Connection cancelled or failed: ' + errInfo(err));
       }
     }
 
     async function onConnected(){
+      persistKnownDevice(device);
       document.getElementById('status').innerText = `Status: Connected to ${device.name || device.id}`;
       log('✅ Connected to: ' + (device.name || device.id));
       showToast('✅ Connected');
 
-      // Ensure we don't attach duplicate listeners
       device.removeEventListener('gattserverdisconnected', onDisconnected);
       device.addEventListener('gattserverdisconnected', onDisconnected);
 
@@ -607,7 +645,6 @@
       const char = await service.getCharacteristic(pumpOnUUID);
       await char.writeValue(new Uint8Array([0x01]));
       pumpRunning = true; syncPumpButtons(); log('💨 Pump ON');
-      // Failsafe set to 36s to allow up to 35s workflow steps
       pumpSafetyTimer = setTimeout(()=>{ stopPump(); log('⛑️ Failsafe: Pump auto-stopped after 36s timeout'); }, 36000);
     }
     async function stopPump(){
@@ -780,7 +817,7 @@
         if (Number.isNaN(p) || p<0 || p>35){ alert('Pump must be 0–35 s'); return; }
         temps.push(t);
         holds.push(Math.round(h*1000));
-        pumps.push(Math.round(p*1000));
+        pumps.push(Math.round(pSec*1000));
       }
       customWorkflows[name] = { name, temperature:temps, holdTimeInMilliSeconds:holds, pumpTimeInMilliSeconds:pumps };
       saveWorkflows();
